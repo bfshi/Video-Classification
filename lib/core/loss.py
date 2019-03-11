@@ -25,5 +25,6 @@ class Loss(nn.Module):
         clf_loss = self.cross_entropy(score, y)
         crt_loss = advantages.pow(2).mean()
         act_loss = -(advantages.detach() * log_prob).mean()
+        #TODO: add distribution loss for modality prob distr
 
         return clf_loss + self.r_act * act_loss + self.r_crt * crt_loss

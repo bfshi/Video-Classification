@@ -16,6 +16,7 @@ class VedioClfNet(nn.Module):
 
         self.backbone = getBackbone()
         self.lstm = getLSTM()
+        #TODO: another act_head for modality selection
         self.act_head = nn.Sequential{
             nn.Linear(config.MODEL.LSTM_OUTDIM, 1),
             nn.Sigmoid(),

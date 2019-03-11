@@ -40,17 +40,26 @@ config.TRAIN.NESTEROV = False
 config.TRAIN.R_ACT =
 config.TRAIN.R_CRT =
 
+config.TRAIN.TRAIN_STEP = 10  #num of steps to train on a single vedio
+config.TRAIN.ROLLOUT_STEP = 1  #num of rollout steps after an action
+
 config.TRAIN.BEGIN_EPOCH = 0
 config.TRAIN.END_EPOCH = 100
 
 config.TRAIN.BATCH_SIZE = 32
 config.TRAIN.SHUFFLE = True
 
+config.TRAIN.PRINT_EVERY =
+
 #testing related ocnfigs
 
 config.TEST = edict()
 
+config.TEST.TEST_STEP =
+
 config.TEST.BATCH_SIZE = 32
+
+config.TEST.PRINT_EVERY =
 
 
 
