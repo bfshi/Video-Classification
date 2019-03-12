@@ -2,6 +2,11 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import os
+import logging
+import time
+from pathlib import Path
+
 import torch
 import torch.optim as optim
 
@@ -71,4 +76,31 @@ def rollout(vedio, model, action, value):
     """
 
     with torch.no_grad():
+
+
+
+
+
+def create_logger(cfg, phase='train'):
+    """
+    create a logger for experiment record
+    To use a logger to publish message m, just run logger.info(m)
+
+    :param cfg: global config
+    :param phase: train or val
+    :return: a logger
+    """
+    time_str = time.strftime('%Y-%m-%d-%H-%M')
+    log_file = '{}_{}_{}.log'.format(cfg.DATASET, time_str, phase)
+    final_log_file = Path(cfg.OUTPUT_DIR) / log_file
+    log_format = '%(asctime)-15s: %(message)s'
+    logging.basicConfig(filename=str(final_log_file),
+                        format=log_format)
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    console = logging.StreamHandler()
+    logging.getLogger('').addHandler(console)
+
+    return logger
+
 

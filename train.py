@@ -23,11 +23,12 @@ from core.loss import Loss
 from dataset.dataset import get_dataset
 from models.model import create_model
 from utils.utils import create_optimizer
+from utils.utils import create_logger
 
 
 def main():
     #create a logger
-    logger =
+    logger = create_logger(config, 'train')
 
     # cudnn related setting
     cudnn.benchmark = config.CUDNN.BENCHMARK
@@ -87,7 +88,7 @@ def main():
 
         if perf_indicator > best_perf:
             best_perf = perf_indicator
-            #save the model
+            #TODO: save the model
 
 
 if __name__ == '__main__':

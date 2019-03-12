@@ -15,6 +15,8 @@ config = edict()
 
 config.GPUS = '0'
 config.WORKERS = 0
+config.DATASET = 'FCVID'
+config.OUTPUT_DIR = 'experiments'
 
 #models related configs
 
