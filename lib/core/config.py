@@ -25,6 +25,10 @@ config.MODEL = edict()
 config.MODEL.LSTM_OUTDIM =
 config.MODEL.CLFDIM =
 
+config.MODEL.RESNET_TYPE = 101
+config.MODEL.INIT_WEIGHTS = True
+config.MODEL.PRETRAINED_PATH = 'pretrained_models/?'
+
 
 
 #training related configs

@@ -11,16 +11,16 @@ from models.lstm import getLSTM
 
 
 class VedioClfNet(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, is_train = True):
         super(VedioClfNet, self).__init__()
 
-        self.backbone = getBackbone()
+        self.backbone = getBackbone(config, is_train)
         self.lstm = getLSTM()
         #TODO: another act_head for modality selection
-        self.act_head = nn.Sequential{
+        self.act_head = nn.Sequential(
             nn.Linear(config.MODEL.LSTM_OUTDIM, 1),
             nn.Sigmoid(),
-        }
+        )
         self.clf_haed = nn.Linear(config.MODEL.LSTM_OUTDIM, config.MODEL.CLFDIM),
         self.crit_head = nn.Linear(config.MODEL.LSTM_OUTDIM, 1)
 
@@ -53,9 +53,9 @@ def create_model(config, is_train = True):
     :return: a model
     """
 
-    model = VedioClfNet(config)
+    model = VedioClfNet(config, is_train)
 
-    if (is_train):
+    if is_train and cfg.MODEL.INIT_WEIGHTS:
         model.init_weights()
 
     return model
