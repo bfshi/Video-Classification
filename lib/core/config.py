@@ -22,10 +22,11 @@ config.OUTPUT_DIR = 'experiments'
 
 config.MODEL = edict()
 
-config.MODEL.LSTM_OUTDIM =
-config.MODEL.CLFDIM =
+config.MODEL.LSTM_INDIM = 2048
+config.MODEL.LSTM_OUTDIM = 2048
+config.MODEL.CLFDIM = 100
 
-config.MODEL.RESNET_TYPE = 101
+config.MODEL.RESNET_TYPE = 18
 config.MODEL.INIT_WEIGHTS = True
 config.MODEL.PRETRAINED_PATH = 'pretrained_models/?'
 
@@ -43,8 +44,8 @@ config.TRAIN.OPTIMIZER = 'adam'
 config.TRAIN.MOMENTUM = 0.9
 config.TRAIN.WD = 0.0001
 config.TRAIN.NESTEROV = False
-config.TRAIN.R_ACT =
-config.TRAIN.R_CRT =
+config.TRAIN.R_ACT = 1
+config.TRAIN.R_CRT = 1
 
 config.TRAIN.TRAIN_STEP = 10  #num of steps to train on a single vedio
 config.TRAIN.ROLLOUT_STEP = 1  #num of rollout steps after an action
@@ -55,17 +56,17 @@ config.TRAIN.END_EPOCH = 100
 config.TRAIN.BATCH_SIZE = 32
 config.TRAIN.SHUFFLE = True
 
-config.TRAIN.PRINT_EVERY =
+config.TRAIN.PRINT_EVERY = 100
 
 #testing related ocnfigs
 
 config.TEST = edict()
 
-config.TEST.TEST_STEP =
+config.TEST.TEST_STEP = 10
 
 config.TEST.BATCH_SIZE = 32
 
-config.TEST.PRINT_EVERY =
+config.TEST.PRINT_EVERY = 100
 
 
 

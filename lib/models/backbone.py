@@ -192,7 +192,7 @@ resnet_spec = {18: (BasicBlock, [2, 2, 2, 2]),
                152: (Bottleneck, [3, 8, 36, 3])}
 
 
-def getBackBone(cfg, is_train):
+def getBackbone(cfg, is_train):
     """
     build a pre-trained resnet backbone which
     returns features from its penultimate layer.
