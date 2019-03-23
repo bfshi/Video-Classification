@@ -31,6 +31,7 @@ class Score_Updater():
         """
         reset all records
         """
+#TODO: train_clf and train_rl
 
 def train(config, train_loader, model, criterion, optimizer,
           epoch):

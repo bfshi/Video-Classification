@@ -22,9 +22,13 @@ config.OUTPUT_DIR = 'experiments'
 
 config.MODEL = edict()
 
+config.MODEL.DISCOUNT = 0.99
+config.MODEL.ENTROPY_RATIO = 1
+
 config.MODEL.LSTM_INDIM = 2048
 config.MODEL.LSTM_OUTDIM = 2048
 config.MODEL.CLFDIM = 100
+config.MODEL.MODALITY_NUM = 3
 
 config.MODEL.RESNET_TYPE = 18
 config.MODEL.INIT_WEIGHTS = True
@@ -44,8 +48,9 @@ config.TRAIN.OPTIMIZER = 'adam'
 config.TRAIN.MOMENTUM = 0.9
 config.TRAIN.WD = 0.0001
 config.TRAIN.NESTEROV = False
-config.TRAIN.R_ACT = 1
-config.TRAIN.R_CRT = 1
+config.TRAIN.R_PLC = 1
+config.TRAIN.R_Q = 1
+config.TRAIN.R_V = 1
 
 config.TRAIN.TRAIN_STEP = 10  #num of steps to train on a single vedio
 config.TRAIN.ROLLOUT_STEP = 1  #num of rollout steps after an action

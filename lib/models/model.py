@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -16,29 +17,56 @@ class VedioClfNet(nn.Module):
 
         self.backbone = getBackbone(config, is_train)
         self.lstm = getLSTM()
-        #TODO: another act_head for modality selection
-        self.act_head = nn.Sequential(
-            nn.Linear(config.MODEL.LSTM_OUTDIM, 1),
+
+        #output [mean, std] of Gaussian distribution for frame selection
+        self.act_head_frame = nn.Sequential(
+            nn.Linear(config.MODEL.LSTM_OUTDIM, 2),
             nn.Sigmoid(),
         )
-        self.clf_haed = nn.Linear(config.MODEL.LSTM_OUTDIM, config.MODEL.CLFDIM),
-        self.crit_head = nn.Linear(config.MODEL.LSTM_OUTDIM, 1)
+
+        #output modality selection probability
+        self.act_head_modality = nn.Sequential(
+            nn.Linear(config.MODEL.LSTM_OUTDIM, config.MODEL.MODALITY_NUM),
+            nn.Softmax(config.MODEL.MODALITY_NUM)
+        )
+
+        #output classification scores (not softmaxed)
+        self.clf_head = nn.Linear(config.MODEL.LSTM_OUTDIM, config.MODEL.CLFDIM)
+
+        #output soft state value
+        self.v_head = nn.Linear(config.MODEL.LSTM_OUTDIM, 1)
+
+        #output soft state-action value
+        self.q_head = nn.Linear(config.MODEL.LSTM_OUTDIM + 1 + config.MODEL.MODALITY_NUM, 1)
 
     def forward(self, x):
         """
         :param x: N * C * H * W
-        :return:
-        action: N * 1
-        score: N * ClassNum (not softmaxed)
-        value: N * 1
         """
         x = self.backbone(x)
         h = self.lstm(x)
-        action = self.act_head(h)
-        score = self.clf_haed(h)
-        value = self.crit_head(h)
+        mean, std = self.act_head_frame(h)
+        modality_prob = self.act_head_modality(h)
+        clf_score = self.clf_haed(h)
+        v_value = self.v_head(h)
 
-        return action, score, value
+        return h, mean, std, modality_prob, clf_score, v_value
+
+    def policy(self, h):
+        """
+        used to replay old state using current policy
+        :param h: old observation
+        :return: new action and log of prob
+        """
+        mean, std = self.act_head_frame(h)
+        modality_prob = self.act_head_modality(h)
+        new_act_frame = torch.normal(mean, std)
+        new_act_modality = torch.multinomial(modality_prob, num_samples=1, replacement=True)
+        log_pi = -torch.log((2 * np.pi) ** 0.5 * std) - \
+                 (new_act_frame - mean).pow(2) / (2 * std.pow(2)) + \
+                 torch.log(modality_prob[:, new_act_modality])
+
+        return new_act_frame, new_act_modality, log_pi
 
     def init_weights(self):
 

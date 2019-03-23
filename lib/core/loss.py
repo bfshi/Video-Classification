@@ -4,27 +4,41 @@ from __future__ import print_function
 
 import torch.nn as nn
 
+import _init_paths
+from core.config import config
+
 class Loss(nn.Module):
     def __init__(self, config):
         super(Loss, self).__init__()
 
-        self.r_act = config.TRAIN.R_ACT
-        self.r_crt = config.TRAIN.R_CRT
+        self.r_plc = config.TRAIN.R_PLC
+        self.r_q = config.TRAIN.R_Q
+        self.r_v = config.TRAIN.R_V
         self.cross_entropy = nn.CrossEntropyLoss()
+        self.q_criterion = nn.MSELoss()
+        self.v_criterion = nn.MSELoss()
 
-    def forward(self, score, y, log_prob, advantages):
-        """
-        compute the loss
+    def clf_loss(self, score, y):
 
-        :param score: score for each class. N * ClassNum
-        :param y: ground-truth class. N
-        :param log_prob: log of each action's probibility. N * stepNum
-        :param advantages: reward + gamma * V_(t+1) - V_t. N * stepNum
-        :return: weighted total loss
-        """
         clf_loss = self.cross_entropy(score, y)
-        crt_loss = advantages.pow(2).mean()
-        act_loss = -(advantages.detach() * log_prob).mean()
-        #TODO: add distribution loss for modality prob distr
 
-        return clf_loss + self.r_act * act_loss + self.r_crt * crt_loss
+        return clf_loss
+
+    def rl_loss(self, rewards, obs, actions, next_obs, q_pred, v_pred, target_v_pred_next,
+                new_actions, log_pi, q_new_actions):
+
+        # q-value loss
+        q_target = rewards + config.DISCOUNT * target_v_pred_next
+        q_loss = self.q_criterion(q_pred, q_target.detach())
+
+        # v-value loss
+        v_target = q_new_actions - config.MODEL.ENTROPY_RATIO * log_pi
+        v_loss = self.v_criterion(v_pred, v_target.detach())
+
+        # policy loss
+        log_policy_target = q_new_actions - v_pred
+        policy_loss = (
+                log_pi * (log_pi - log_policy_target).detach()
+        ).mean()
+
+        return self.r_plc * policy_loss + self.r_q * q_loss + self.r_v * v_loss
