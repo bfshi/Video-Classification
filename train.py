@@ -24,6 +24,7 @@ from dataset.dataset import get_dataset
 from models.model import create_model
 from utils.utils import create_optimizer
 from utils.utils import create_logger
+from utils.replay_buffer import create_replay_buffer
 
 
 def main():
@@ -54,6 +55,9 @@ def main():
         config.TRAIN.LR_DECAY_RATE
     )
 
+    #create a new replay buffer
+    replay_buffer = create_replay_buffer()
+
     #load data
     normalize = transforms.Normalize(mean = , std = )
 
@@ -81,7 +85,7 @@ def main():
         lr_scheduler.step()
 
         # train for one epoch
-        train(config, train_loader, model, criterion, optimizer, epoch)
+        train(config, train_loader, model, criterion, optimizer, epoch, replay_buffer)
 
         # evaluate on validation set
         perf_indicator = validate(config, valid_loader, model, criterion, epoch)

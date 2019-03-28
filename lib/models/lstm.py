@@ -18,13 +18,17 @@ class LSTM(nn.Module):
         self.c = None
         #TODO: global memory
 
-    def reset(self, batch_size):
-        self.h = torch.zeros((batch_size, config.MODEL.LSTM_OUTDIM)).cuda()
-        self.c = torch.zeros((batch_size, config.MODEL.LSTM_OUTDIM)).cuda()
+    def reset(self, batch_size, h_c = None):
+        if h_c == None:
+            self.h = torch.zeros((batch_size, config.MODEL.LSTM_OUTDIM)).cuda()
+            self.c = torch.zeros((batch_size, config.MODEL.LSTM_OUTDIM)).cuda()
+        else:
+            self.h = h_c[0]
+            self.c = h_c[1]
 
     def forward(self, input):
         self.h, self.c = self.lstm(input, (self.h, self.c))
-        return self.h
+        return self.h, self.c
 
 
 

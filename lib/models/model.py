@@ -9,6 +9,7 @@ import torch.nn as nn
 import _init_paths
 from models.backbone import getBackbone
 from models.lstm import getLSTM
+from utils.utils import soft_update_from_to
 
 
 class VedioClfNet(nn.Module):
@@ -18,39 +19,43 @@ class VedioClfNet(nn.Module):
         self.backbone = getBackbone(config, is_train)
         self.lstm = getLSTM()
 
-        #output [mean, std] of Gaussian distribution for frame selection
+        # output [mean, std] of Gaussian distribution for frame selection
         self.act_head_frame = nn.Sequential(
             nn.Linear(config.MODEL.LSTM_OUTDIM, 2),
             nn.Sigmoid(),
         )
 
-        #output modality selection probability
+        # output modality selection probability
         self.act_head_modality = nn.Sequential(
             nn.Linear(config.MODEL.LSTM_OUTDIM, config.MODEL.MODALITY_NUM),
             nn.Softmax(config.MODEL.MODALITY_NUM)
         )
 
-        #output classification scores (not softmaxed)
+        # output classification scores (not softmaxed)
         self.clf_head = nn.Linear(config.MODEL.LSTM_OUTDIM, config.MODEL.CLFDIM)
 
-        #output soft state value
+        # output soft state value
         self.v_head = nn.Linear(config.MODEL.LSTM_OUTDIM, 1)
 
-        #output soft state-action value
-        self.q_head = nn.Linear(config.MODEL.LSTM_OUTDIM + 1 + config.MODEL.MODALITY_NUM, 1)
+        # target v_head and synchronize params
+        self.target_v_head = nn.Linear(config.MODEL.LSTM_OUTDIM, 1)
+        soft_update_from_to(self.v_head, self.target_v_head, 1)
+
+        # output soft state-action value
+        self.q_head = nn.Linear(config.MODEL.LSTM_OUTDIM + 1 + 1, 1)
 
     def forward(self, x):
         """
         :param x: N * C * H * W
         """
         x = self.backbone(x)
-        h = self.lstm(x)
-        mean, std = self.act_head_frame(h)
-        modality_prob = self.act_head_modality(h)
+        h, c = self.lstm(x)
         clf_score = self.clf_haed(h)
-        v_value = self.v_head(h)
+        # mean, std = self.act_head_frame(h)
+        # modality_prob = self.act_head_modality(h)
+        # v_value = self.v_head(h)
 
-        return h, mean, std, modality_prob, clf_score, v_value
+        return (h, c), clf_score
 
     def policy(self, h):
         """
@@ -68,8 +73,9 @@ class VedioClfNet(nn.Module):
 
         return new_act_frame, new_act_modality, log_pi
 
-    def init_weights(self):
+    def init_weights(self, batch_size, h_c):
 
+        self.lstm.reset(batch_size, h_c)
 
 
 def create_model(config, is_train = True):

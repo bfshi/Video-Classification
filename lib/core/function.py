@@ -12,7 +12,9 @@ import torch
 import _init_paths
 from utils.utils import AverageMeter
 from utils.utils import ChooseInput
-from utils.utils import rollout
+from utils.utils import compute_reward
+from utils.utils import soft_update_from_to
+
 
 def Act_Init():
     """
@@ -31,10 +33,10 @@ class Score_Updater():
         """
         reset all records
         """
-#TODO: train_clf and train_rl
+
 
 def train(config, train_loader, model, criterion, optimizer,
-          epoch):
+          epoch, replay_buffer):
     """
     training method
 
@@ -44,12 +46,14 @@ def train(config, train_loader, model, criterion, optimizer,
     :param criterion: loss module
     :param optimizer: SGD or ADAM
     :param epoch: current epoch
+    :param replay_buffer: buffer for self replay
     :return: None
     """
 
     #build recorders
     batch_time = AverageMeter()
-    losses = AverageMeter()
+    clf_losses = AverageMeter()
+    rl_losses = AverageMeter()
     losses_batch = AverageMeter()
 
     #switch to train mode
@@ -58,41 +62,95 @@ def train(config, train_loader, model, criterion, optimizer,
     end = time.time()
     for i, (vedio, target) in enumerate(train_loader):
 
-        # initialize the action
-        action = Act_Init()
+        #TODO: initialize observation
+        #ob = (h, c)
+        ob =
+        model.init_weights(vedio.shape[0], ob)
 
         losses_batch.reset()
 
-        for step in range(config.TRAIN.TRAIN_STEP):
+        # train clf_head
+        for step in range(config.TRAIN.TRAIN_CLF_STEP):
 
-            #choose input according to the action
-            input = ChooseInput(vedio, action)
+            # decide action according to model's policy and current observation
+            new_act_frame, new_act_modality, _ = model.policy(ob[0])
 
-            #compute output
-            action, score, value = model(input)
+            # get the input
+            input = ChooseInput(vedio, new_act_frame, new_act_modality)
 
-            #rollout
-            log_prob, advantages = rollout(vedio, model, action, value)
+            # compute output
+            next_ob, clf_score = model(input)
 
-            #compute loss
-            loss = criterion(score, target, log_prob, advantages)
+            # save into replay buffer
+            replay_buffer.save(ob, new_act_frame, new_act_modality,
+                              next_ob, compute_reward(clf_score))
 
-            #back prop
+            # compute loss
+            loss = criterion.clf_loss(clf_score, target)
+
+            # back prop
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            #update batch loss
+            # update batch loss
             losses_batch.update(loss.item(), input.shape[0])
 
-        #update total loss
-        losses.update(losses_batch.avg, losses_batch.count)
+            # update ob
+            ob = next_ob
+
+        #update total clf_loss
+        clf_losses.update(losses_batch.avg, losses_batch.count)
+
+        losses_batch.reset()
+
+        # TODO: In early stage we could only train classifier.
+        # train the policy
+        for step in range(config.TRAIN.TRAIN_RL_STEP):
+
+            # sample from replay buffer a minibatch
+            ob, act_frame, act_modality, next_ob, reward = \
+                replay_buffer.get_batch(config.TRAIN.RL_BATCH_SIZE)
+
+            # reset lstm's h and c
+            model.init_weights(ob[0].shape[0], ob)
+
+            # update reward and next_ob (shouldn't use the old ones)
+            input = ChooseInput(vedio, act_frame, act_modality)
+            next_ob, clf_score = model(input)
+            reward = compute_reward(clf_score)
+
+            # calculate new outputs
+            q_pred = model.q_head(torch.cat((ob[0], act_frame, act_modality), 1))
+            v_pred = model.v_head(ob[0])
+
+            new_act_frame, new_act_modality, log_pi = model.policy(ob[0])
+            q_new_actions = model.q_head(torch.cat((ob[0], new_act_frame, new_act_modality), 1))
+            target_v_pred_next = model.target_v_head(ob[0])
+
+            # compute the loss
+            loss = rl_losses(reward, q_pred, v_pred, target_v_pred_next, log_pi, q_new_actions)
+
+            # back prop
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            # update batch loss
+            losses_batch.update(loss.item(), input.shape[0])
+
+        # update total rl_loss
+        rl_losses.update(losses_batch.avg, losses_batch.count)
+
+        # soft update
+        soft_update_from_to(model.v_head, model.target_v_head, config.TRAIN.SOFT_UPDATE)
+
 
         batch_time.update(time.time() - end)
         end = time.time()
 
         if i % config.TRAIN.PRINT_EVERY == 0:
-            #TODO: logging training record
+            # TODO: logging training record
 
 
 

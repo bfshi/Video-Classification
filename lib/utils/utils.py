@@ -54,12 +54,13 @@ class AverageMeter(object):
         self.avg = self.sum / self.count if self.count != 0 else 0
 
 
-def ChooseInput(vedio, action):
+def ChooseInput(vedio, act_frame, act_modality):
     """
     choose the frame and modality indicated by action
 
     :param vedio: the whole batch of full vedios
-    :param action: model's action for each vedio in the batch
+    :param act_frame: chosen frame
+    :param act_modality: chosen modality
     :return: input choice for each vedio in the batch
     """
 
@@ -77,6 +78,26 @@ def rollout(vedio, model, action, value):
 
     with torch.no_grad():
 
+def compute_reward(clf_score):
+    """
+    compute reward according to classification score
+    :param clf_score: NOT softmaxed!!!
+    :return: reward
+    """
+
+
+def soft_update_from_to(source, target, tau):
+    """
+    soft update for target v_head
+    :param source: v_head
+    :param target: target v_head
+    :param tau: update rate
+    :return: None
+    """
+    for target_param, param in zip(target.parameters(), source.parameters()):
+        target_param.data.copy_(
+            target_param.data * (1.0 - tau) + param.data * tau
+        )
 
 
 
@@ -104,3 +125,82 @@ def create_logger(cfg, phase='train'):
     return logger
 
 
+
+
+
+"""
+GPU wrappers
+"""
+
+_use_gpu = False
+device = None
+
+
+def set_gpu_mode(mode, gpu_id=0):
+    global _use_gpu
+    global device
+    global _gpu_id
+    _gpu_id = gpu_id
+    _use_gpu = mode
+    device = torch.device("cuda:" + str(gpu_id) if _use_gpu else "cpu")
+
+
+def gpu_enabled():
+    return _use_gpu
+
+
+def set_device(gpu_id):
+    torch.cuda.set_device(gpu_id)
+
+
+# noinspection PyPep8Naming
+def FloatTensor(*args, **kwargs):
+    return torch.FloatTensor(*args, **kwargs).to(device)
+
+
+def from_numpy(*args, **kwargs):
+    return torch.from_numpy(*args, **kwargs).float().to(device)
+
+
+def get_numpy(tensor):
+    return tensor.to('cpu').detach().numpy()
+
+
+def ones(*sizes, torch_device=None, **kwargs):
+    if torch_device is None:
+        torch_device = device
+    return torch.ones(*sizes, **kwargs, device=torch_device)
+
+
+def ones_like(*args, torch_device=None, **kwargs):
+    if torch_device is None:
+        torch_device = device
+    return torch.ones_like(*args, **kwargs, device=torch_device)
+
+
+def randn(*args, torch_device=None, **kwargs):
+    if torch_device is None:
+        torch_device = device
+    return torch.randn(*args, **kwargs, device=torch_device)
+
+
+def zeros(*sizes, torch_device=None, **kwargs):
+    if torch_device is None:
+        torch_device = device
+    return torch.zeros(*sizes, **kwargs, device=torch_device)
+
+
+def zeros_like(*args, torch_device=None, **kwargs):
+    if torch_device is None:
+        torch_device = device
+    return torch.zeros_like(*args, **kwargs, device=torch_device)
+
+
+def tensor(*args, torch_device=None, **kwargs):
+    if torch_device is None:
+        torch_device = device
+    return torch.tensor(*args, **kwargs, device=torch_device)
+
+
+def normal(*args, **kwargs):
+    return torch.normal(*args, **kwargs).to(device)

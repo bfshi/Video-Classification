@@ -24,8 +24,7 @@ class Loss(nn.Module):
 
         return clf_loss
 
-    def rl_loss(self, rewards, obs, actions, next_obs, q_pred, v_pred, target_v_pred_next,
-                new_actions, log_pi, q_new_actions):
+    def rl_loss(self, rewards, q_pred, v_pred, target_v_pred_next, log_pi, q_new_actions):
 
         # q-value loss
         q_target = rewards + config.DISCOUNT * target_v_pred_next
