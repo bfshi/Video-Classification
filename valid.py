@@ -27,7 +27,7 @@ from utils.utils import create_optimizer
 
 def main():
     #create a logger
-    logger =
+    logger = create_logger(config, 'val')
 
     # cudnn related setting
     cudnn.benchmark = config.CUDNN.BENCHMARK
@@ -35,7 +35,7 @@ def main():
     torch.backends.cudnn.enabled = config.CUDNN.ENABLED
 
     #load a model
-    model =
+    model = model = create_model(config, is_train = False)
 
 
     #use multi gpus in parallel
@@ -46,7 +46,8 @@ def main():
     criterion = Loss(config).cuda()
 
     # load data
-    normalize = transforms.Normalize(mean=, std=)
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
 
     valid_dataset = get_dataset(if_train=False)
 
@@ -59,6 +60,8 @@ def main():
     )
 
     perf = validate(config, valid_loader, model, criterion, epoch)
+
+    # TODO: logging
 
 if __name__ == '__main__':
     main()

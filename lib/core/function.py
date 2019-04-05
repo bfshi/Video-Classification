@@ -60,12 +60,13 @@ def train(config, train_loader, model, criterion, optimizer,
     model.train()
 
     end = time.time()
-    for i, (vedio, target) in enumerate(train_loader):
+    for i, (vedio, target, meta) in enumerate(train_loader):
 
-        #TODO: initialize observation
+        # initialize the observation
         #ob = (h, c)
-        ob =
-        model.init_weights(vedio.shape[0], ob)
+        ob = (torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda(),
+              torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda())
+        model.init_weights(target.shape[0], ob)
 
         losses_batch.reset()
 
@@ -76,10 +77,10 @@ def train(config, train_loader, model, criterion, optimizer,
             new_act_frame, new_act_modality, _ = model.policy(ob[0])
 
             # get the input
-            input = ChooseInput(vedio, new_act_frame, new_act_modality)
+            input = ChooseInput(vedio, new_act_frame, new_act_modality, meta['framenum'])
 
             # compute output
-            next_ob, clf_score = model(input)
+            next_ob, clf_score = model(input, new_act_modality)
 
             # save into replay buffer
             replay_buffer.save(ob, new_act_frame, new_act_modality,
@@ -153,6 +154,7 @@ def train(config, train_loader, model, criterion, optimizer,
             # TODO: logging training record
 
 
+# TODO: update validate
 
 def validate(config, val_loader, model, criterion, epoch):
     """

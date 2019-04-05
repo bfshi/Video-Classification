@@ -16,7 +16,8 @@ class VedioClfNet(nn.Module):
     def __init__(self, config, is_train = True):
         super(VedioClfNet, self).__init__()
 
-        self.backbone = getBackbone(config, is_train)
+        self.rgb_backbone = getBackbone(config, is_train)
+        self.flow_backbone = getBackbone(config, is_train)
         self.lstm = getLSTM()
 
         # output [mean, std] of Gaussian distribution for frame selection
@@ -44,11 +45,17 @@ class VedioClfNet(nn.Module):
         # output soft state-action value
         self.q_head = nn.Linear(config.MODEL.LSTM_OUTDIM + 1 + 1, 1)
 
-    def forward(self, x):
+    def forward(self, x, modality):
         """
         :param x: N * C * H * W
+        :param modality: 0-rgb_raw, 1-flow
         """
-        x = self.backbone(x)
+        # TODO: pick different instances for different modalities
+        # if modality == 0:
+        #     x = self.rgb_backbone(x)
+        # elif modality == 1:
+        #     x = self.flow_backbone(torch.cat((x, torch.zeros((x.shape[0], 1, x.shape[2], x.shape[3]).cuda()))),
+        #                            dim = 1)
         h, c = self.lstm(x)
         clf_score = self.clf_haed(h)
         # mean, std = self.act_head_frame(h)

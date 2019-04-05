@@ -54,22 +54,28 @@ class AverageMeter(object):
         self.avg = self.sum / self.count if self.count != 0 else 0
 
 
-def ChooseInput(vedio, act_frame, act_modality):
+def ChooseInput(video, act_frame, act_modality, framenum):
     """
     choose the frame and modality indicated by action
 
-    :param vedio: the whole batch of full vedios
-    :param act_frame: chosen frame
+    :param vedio: the whole batch of full videos
+    :param act_frame: chosen frame position. \in [0, 1]
     :param act_modality: chosen modality
-    :return: input choice for each vedio in the batch
+    :return: input choice for each video in the batch
     """
+    # TODO: When batch_size > 1, we must use 'for loop' to choose modality
+    #  and also to feed into the model because different instances may have
+    #  different modalities chosen.
+
+    act_frame = int(np.clip(act_frame * (framenum - 1), 0, framenum - 1))
+    return video[act_modality][act_frame]
 
 
 def rollout(vedio, model, action, value):
     """
     rollout according to model's policy
 
-    :param vedio: the whole batch of full vedios
+    :param vedio: the whole batch of full videos
     :param model: VideoClfNet
     :param action: current action
     :param value: current state value
@@ -84,6 +90,13 @@ def compute_reward(clf_score):
     :param clf_score: NOT softmaxed!!!
     :return: reward
     """
+    # TODO: log(max / second_max) or log(gt / max_else) ???
+    clf_score = torch.nn.functional.softmax(clf_score, dim = 1)
+    maxv, maxpos = clf_score.max(dim = 1)
+    minv, _ = clf_score.min(dim = 1)
+    clf_score[:, maxpos] = minv
+    second_maxv, _ = clf_score.max()
+    return torch.log(maxv / second_maxv)
 
 
 def soft_update_from_to(source, target, tau):
@@ -132,8 +145,8 @@ def create_logger(cfg, phase='train'):
 GPU wrappers
 """
 
-_use_gpu = False
-device = None
+_use_gpu = True
+device = 'gpu'
 
 
 def set_gpu_mode(mode, gpu_id=0):

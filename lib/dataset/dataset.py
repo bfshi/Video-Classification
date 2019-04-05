@@ -58,7 +58,7 @@ class ActivityNet(VideoSet):
 
         video_info_dict = {}
 
-        for video_name, v in anndata['database'].iteritems():
+        for video_name, v in anndata['database'].items():
             # only training or validation
             if v['subset'] != self.mode:
                 continue
@@ -79,7 +79,10 @@ class ActivityNet(VideoSet):
         # with open(self.config.TRAIN.DATAROOT + self.config.TRAIN.DATASET + '/video_info_new.csv', 'r') as infofile:
         #     lines = csv.DictReader(infofile)
         #     for line in lines:
-        #         video_info_dict[line['video']]['metadata']['framenum'] = line['numFrame']
+        #         if line['subset'] != self.mode:
+        #             continue
+        #         line['video'] = line['video'][2:]
+        #         video_info_dict[line['video']]['metadata']['framenum'] = int(line['numFrame'])
         #         self.video_info.append(video_info_dict[line['video']])
         #         if video_info_dict[line['video']]['label'] not in self.label_dic:
         #             self.label_dic[video_info_dict[line['video']]['label']] = label_cnt
@@ -87,9 +90,14 @@ class ActivityNet(VideoSet):
 
         # count number of frames for each video
         # video_info is sorted in alphabetic order
+        # TODO: counting everytime is time-consuming. Try to correct numframe in .csv
+
         with open(self.config.TRAIN.DATAROOT + self.config.TRAIN.DATASET + '/video_info_new.csv', 'r') as infofile:
             lines = csv.DictReader(infofile)
             for line in lines:
+                if line['subset'] != self.mode:
+                    continue
+                line['video'] = line['video'][2:]
                 video_info_dict[line['video']]['metadata']['framenum'] = \
                     glob.glob(os.path.join(self.config.TRAIN.DATAROOT, self.config.TRAIN.DATASET,
                                            'frame_flow', line['video'], 'img_*.jpg')).__len__()
@@ -106,8 +114,8 @@ class ActivityNet(VideoSet):
         :return: input, label_idx, meta = {'framenum': xxx, 'label': 'label_name'}
         """
         item_info = self.video_info[idx]
-        frame_flow_path = os.path.join(self.config.TRAIN.DATAROOT + self.config.TRAIN.DATASET +
-                                       'frame_flow' + item_info['name'])
+        frame_flow_path = os.path.join(self.config.TRAIN.DATAROOT, self.config.TRAIN.DATASET,
+                                       'frame_flow', item_info['name'])
 
         # read rgb features
         rgb_feature_list = [np.transpose(cv2.imread(os.path.join(frame_flow_path, 'img_%.5d.jpg' % i),
@@ -118,10 +126,10 @@ class ActivityNet(VideoSet):
         rgb_feature = rgb_feature / 255
 
         # read flow features
-        flow_feature_list = [np.stack(cv2.imread(os.path.join(frame_flow_path, 'flow_x_%.5d.jpg' % i),
+        flow_feature_list = [np.stack([cv2.imread(os.path.join(frame_flow_path, 'flow_x_%.5d.jpg' % i),
                                   cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION),
                                       cv2.imread(os.path.join(frame_flow_path, 'flow_y_%.5d.jpg' % i),
-                                  cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION)
+                                  cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION)]
                              ) for i in range(1, item_info['metadata']['framenum'] + 1)]
         flow_feature = np.stack(flow_feature_list)
         # map to [0, 1]
