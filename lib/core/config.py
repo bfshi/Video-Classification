@@ -38,6 +38,9 @@ config.MODEL.PRETRAINED_PATH = 'pretrained_models/?'
 
 config.TRAIN = edict()
 
+config.TRAIN.DATAROOT = '/m/shibf/video_classification/data/'
+config.TRAIN.DATASET = 'ActivityNet'
+
 config.TRAIN.LR = 0.001
 config.TRAIN.LR_DECAY_RATE = 1
 config.TRAIN.LR_MILESTONES = []  # at which epoch lr decays

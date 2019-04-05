@@ -59,10 +59,25 @@ def main():
     replay_buffer = create_replay_buffer()
 
     #load data
-    normalize = transforms.Normalize(mean = , std = )
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
 
-    train_dataset = get_dataset(if_train = True)
-    valid_dataset = get_dataset(if_train = False)
+    train_dataset = get_dataset(
+        config,
+        if_train = True,
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            normalize,
+        ])
+    )
+    valid_dataset = get_dataset(
+        config,
+        if_train = False,
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            normalize,
+        ])
+    )
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
