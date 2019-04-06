@@ -9,6 +9,7 @@ import os
 import glob
 
 import numpy as np
+import torch
 from torch.utils.data import Dataset
 import torchvision.transforms as transforms
 
@@ -74,7 +75,26 @@ class ActivityNet(VideoSet):
         # load framenum and record labels
         label_cnt = 0
 
-        # numFrame in .csv is imprecise
+        # using numFrame in video_numframe_correction.csv which is precise.
+
+        with open(self.config.TRAIN.DATAROOT + self.config.TRAIN.DATASET
+                  + '/video_info_new.csv', 'r') as infofile:
+            with open(self.config.TRAIN.DATAROOT + self.config.TRAIN.DATASET
+                      + '/video_numframe_correction.csv', 'r') as correction_file:
+                lines = csv.DictReader(infofile)
+                correction_lines = csv.DictReader(correction_file)
+                for line, correction_line in zip(lines, correction_lines):
+                    if line['subset'] != self.mode:
+                        continue
+                    line['video'] = line['video'][2:]
+                    video_info_dict[line['video']]['metadata']['framenum'] = int(correction_line['numFrame'])
+                    self.video_info.append(video_info_dict[line['video']])
+                    if video_info_dict[line['video']]['label'] not in self.label_dic:
+                        self.label_dic[video_info_dict[line['video']]['label']] = label_cnt
+                        label_cnt += 1
+
+        # count number of frames for each video
+        # video_info is sorted in alphabetic order
 
         # with open(self.config.TRAIN.DATAROOT + self.config.TRAIN.DATASET + '/video_info_new.csv', 'r') as infofile:
         #     lines = csv.DictReader(infofile)
@@ -82,30 +102,14 @@ class ActivityNet(VideoSet):
         #         if line['subset'] != self.mode:
         #             continue
         #         line['video'] = line['video'][2:]
-        #         video_info_dict[line['video']]['metadata']['framenum'] = int(line['numFrame'])
+        #         video_info_dict[line['video']]['metadata']['framenum'] = \
+        #             glob.glob(os.path.join(self.config.TRAIN.DATAROOT, self.config.TRAIN.DATASET,
+        #                                    'frame_flow', line['video'], 'img_*.jpg')).__len__()
         #         self.video_info.append(video_info_dict[line['video']])
+        #         # load label_dict
         #         if video_info_dict[line['video']]['label'] not in self.label_dic:
         #             self.label_dic[video_info_dict[line['video']]['label']] = label_cnt
         #             label_cnt += 1
-
-        # count number of frames for each video
-        # video_info is sorted in alphabetic order
-        # TODO: counting everytime is time-consuming. Try to correct numframe in .csv
-
-        with open(self.config.TRAIN.DATAROOT + self.config.TRAIN.DATASET + '/video_info_new.csv', 'r') as infofile:
-            lines = csv.DictReader(infofile)
-            for line in lines:
-                if line['subset'] != self.mode:
-                    continue
-                line['video'] = line['video'][2:]
-                video_info_dict[line['video']]['metadata']['framenum'] = \
-                    glob.glob(os.path.join(self.config.TRAIN.DATAROOT, self.config.TRAIN.DATASET,
-                                           'frame_flow', line['video'], 'img_*.jpg')).__len__()
-                self.video_info.append(video_info_dict[line['video']])
-                # load label_dict
-                if video_info_dict[line['video']]['label'] not in self.label_dic:
-                    self.label_dic[video_info_dict[line['video']]['label']] = label_cnt
-                    label_cnt += 1
 
     def __getitem__(self, idx):
         """
@@ -113,6 +117,7 @@ class ActivityNet(VideoSet):
         :param idx: index of item
         :return: input, label_idx, meta = {'framenum': xxx, 'label': 'label_name'}
         """
+        print(idx)
         item_info = self.video_info[idx]
         frame_flow_path = os.path.join(self.config.TRAIN.DATAROOT, self.config.TRAIN.DATASET,
                                        'frame_flow', item_info['name'])
@@ -122,18 +127,16 @@ class ActivityNet(VideoSet):
                                   cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION), (2, 0, 1))
                        for i in range(1, item_info['metadata']['framenum'] + 1)]
         rgb_feature = np.stack(rgb_feature_list)
-        # map to [0, 1]
-        rgb_feature = rgb_feature / 255
 
         # read flow features
+        # x_channel + y_channel + zero_channel (for size compatibility)
         flow_feature_list = [np.stack([cv2.imread(os.path.join(frame_flow_path, 'flow_x_%.5d.jpg' % i),
                                   cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION),
                                       cv2.imread(os.path.join(frame_flow_path, 'flow_y_%.5d.jpg' % i),
-                                  cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION)]
+                                  cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION),
+                                       np.zeros((rgb_feature.shape[2], rgb_feature.shape[3]))]
                              ) for i in range(1, item_info['metadata']['framenum'] + 1)]
         flow_feature = np.stack(flow_feature_list)
-        # map to [0, 1]
-        flow_feature = flow_feature / 255
 
         # transform
         if self.rgb_transform:

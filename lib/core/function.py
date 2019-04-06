@@ -14,7 +14,10 @@ from utils.utils import AverageMeter
 from utils.utils import ChooseInput
 from utils.utils import compute_reward
 from utils.utils import soft_update_from_to
+from utils.utils import compute_acc
 
+
+logger = logging.getLogger(__name__)
 
 def Act_Init():
     """
@@ -60,7 +63,7 @@ def train(config, train_loader, model, criterion, optimizer,
     model.train()
 
     end = time.time()
-    for i, (vedio, target, meta) in enumerate(train_loader):
+    for i, (video, target, meta) in enumerate(train_loader):
 
         # initialize the observation
         #ob = (h, c)
@@ -77,7 +80,7 @@ def train(config, train_loader, model, criterion, optimizer,
             new_act_frame, new_act_modality, _ = model.policy(ob[0])
 
             # get the input
-            input = ChooseInput(vedio, new_act_frame, new_act_modality, meta['framenum'])
+            input = ChooseInput(video, new_act_frame, new_act_modality, meta['framenum'])
 
             # compute output
             next_ob, clf_score = model(input, new_act_modality)
@@ -117,7 +120,7 @@ def train(config, train_loader, model, criterion, optimizer,
             model.init_weights(ob[0].shape[0], ob)
 
             # update reward and next_ob (shouldn't use the old ones)
-            input = ChooseInput(vedio, act_frame, act_modality)
+            input = ChooseInput(video, act_frame, act_modality)
             next_ob, clf_score = model(input)
             reward = compute_reward(clf_score)
 
@@ -152,6 +155,7 @@ def train(config, train_loader, model, criterion, optimizer,
 
         if i % config.TRAIN.PRINT_EVERY == 0:
             # TODO: logging training record
+            continue
 
 
 # TODO: update validate
@@ -180,7 +184,7 @@ def validate(config, val_loader, model, criterion, epoch):
     with torch.no_grad():
         end = time.time()
 
-        for i, (vedio, target) in enumerate(val_loader):
+        for i, (video, target) in enumerate(val_loader):
 
             action = Act_Init()
             score_updater.reset()
@@ -189,7 +193,7 @@ def validate(config, val_loader, model, criterion, epoch):
             #TODO: how to decide when to stop?
             for step in range(config.TRAIN.TEST_STEP):
                 # choose input according to the action
-                input = ChooseInput(vedio, action)
+                input = ChooseInput(video, action)
 
                 # compute output
                 action, score, value = model(input)
@@ -197,7 +201,7 @@ def validate(config, val_loader, model, criterion, epoch):
                 #TODO: need to compute loss during test?
 
                 # rollout
-                log_prob, advantages = rollout(vedio, model, action, value)
+                log_prob, advantages = rollout(video, model, action, value)
 
                 # compute loss
                 loss = criterion(score, target, log_prob, advantages)
@@ -213,7 +217,168 @@ def validate(config, val_loader, model, criterion, epoch):
             batch_time.update(time.time() - end)
             end = time.time()
 
-            if i % config.TRAIN.PRINT_EVERY == 0:
+            if i % config.TEST.PRINT_EVERY == 0:
                 # TODO: logging validating record
+                continue
 
 
+def train_clf(config, train_loader, model, criterion, optimizer, epoch):
+    """
+    train backbone, lstm and clf_head only.
+    unsorted sampling is used for each video.
+
+    :param config: global configs
+    :param train_loader: data loader
+    :param model: model to be trained
+    :param criterion: loss module
+    :param optimizer: SGD or ADAM
+    :param epoch: current epoch
+    :return: None
+    """
+
+    # build recorders
+    batch_time = AverageMeter()
+    data_time = AverageMeter()
+    clf_losses = AverageMeter()
+    acc = AverageMeter()
+
+
+    # switch to train mode
+    model.train()
+
+    end = time.time()
+    for i, (video, target, meta) in enumerate(train_loader):
+        # measure data loading time
+        data_time.update(time.time() - end)
+
+        # initialize the observation
+        # ob = (h, c)
+        ob = (torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda(),
+              torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda())
+        model.init_weights(target.shape[0], ob)
+
+        batch_size = target.shape[0]
+
+        # unsorted sampling.
+        frame_chosen = np.random.rand(config.TRAIN_CLF.SAMPLE_NUM)
+        modality_chosen = np.random.randint(0, config.MODEL.MODALITY_NUM, size=(config.TRAIN_CLF.SAMPLE_NUM))
+
+        clf_score_sum = torch.zeros((batch_size, config.MODEL.CLFDIM)).cuda()
+
+        for j in range(config.TRAIN_CLF.SAMPLE_NUM):
+            # single modality feature: N * frame_num * channel * H * W
+            input = video[modality_chosen[j]][:, frame_chosen[j] * meta['framenum'], :, :, :]
+
+            # compute output
+            _, clf_score = model(input, torch.full((batch_size), modality_chosen[j]))
+
+            # accumulate clf_score
+            clf_score_sum += clf_score
+
+        #update acc
+        avg_acc = compute_acc(clf_score_sum, target)
+        acc.update(avg_acc, batch_size)
+
+        # compute loss
+        loss = criterion.clf_loss(clf_score_sum, target)
+
+        # back prop
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        # update total clf_loss
+        clf_losses.update(loss.item(), batch_size)
+
+        # update time record
+        batch_time.update(time.time() - end)
+        end = time.time()
+
+        # logging
+        if i % config.TRAIN.PRINT_EVERY == 0:
+            msg = 'Epoch: [{0}][{1}/{2}]\t' \
+                  'Time {batch_time.val:.3f}s ({batch_time.avg:.3f}s)\t' \
+                  'Speed {speed:.1f} samples/s\t' \
+                  'Data {data_time.val:.3f}s ({data_time.avg:.3f}s)\t' \
+                  'Loss {loss.val:.5f} ({loss.avg:.5f})\t' \
+                  'Accuracy {acc.val:.3f} ({acc.avg:.3f})'.format(
+                epoch, i, len(train_loader), batch_time=batch_time,
+                speed=batch_size / batch_time.val,
+                data_time=data_time, loss=clf_losses, acc=acc)
+            logger.info(msg)
+
+
+def validate_clf(config, val_loader, model, criterion, epoch):
+    """
+    validate backbone, lstm and clf_head only.
+    unsorted sampling is used for each video.
+
+    :param config: global configs
+    :param val_loader: data loader
+    :param model: model to be trained
+    :param criterion: loss module
+    :param epoch: current epoch
+    :return: None
+    """
+
+    # build recorders
+    batch_time = AverageMeter()
+    clf_losses = AverageMeter()
+    acc = AverageMeter()
+
+    # switch to val mode
+    model.eval()
+
+    with torch.no_grad():
+
+        end = time.time()
+        for i, (video, target, meta) in enumerate(val_loader):
+
+            # initialize the observation
+            # ob = (h, c)
+            ob = (torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda(),
+                  torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda())
+            model.init_weights(target.shape[0], ob)
+
+            batch_size = target.shape[0]
+
+            # unsorted sampling.
+            frame_chosen = np.random.rand(config.TRAIN_CLF.SAMPLE_NUM)
+            modality_chosen = np.random.randint(0, config.MODEL.MODALITY_NUM, size=(config.TRAIN_CLF.SAMPLE_NUM))
+
+            clf_score_sum = torch.zeros((batch_size, config.MODEL.CLFDIM)).cuda()
+
+            for j in range(config.TRAIN_CLF.SAMPLE_NUM):
+                # single modality feature: N * frame_num * channel * H * W
+                input = video[modality_chosen[j]][:, frame_chosen[j] * meta['framenum'], :, :, :]
+
+                # compute output
+                _, clf_score = model(input, torch.full((batch_size), modality_chosen[j]))
+
+                # accumulate clf_score
+                clf_score_sum += clf_score
+
+            #update acc
+            avg_acc = compute_acc(clf_score_sum, target)
+            acc.update(avg_acc, batch_size)
+
+            # compute loss
+            loss = criterion.clf_loss(clf_score_sum, target)
+
+            # update total clf_loss
+            clf_losses.update(loss.item(), batch_size)
+
+            # update time record
+            batch_time.update(time.time() - end)
+            end = time.time()
+
+            if i % config.TEST.PRINT_EVERY == 0:
+                msg = 'Test: [{0}/{1}]\t' \
+                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t' \
+                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t' \
+                      'Accuracy {acc.val:.3f} ({acc.avg:.3f})'.format(
+                    i, len(val_loader), batch_time=batch_time,
+                    loss=clf_losses, acc=acc)
+                logger.info(msg)
+
+    return acc.avg

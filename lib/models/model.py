@@ -16,8 +16,10 @@ class VedioClfNet(nn.Module):
     def __init__(self, config, is_train = True):
         super(VedioClfNet, self).__init__()
 
+        self.config = config
         self.rgb_backbone = getBackbone(config, is_train)
         self.flow_backbone = getBackbone(config, is_train)
+        self.backbone = [self.rgb_backbone, self.flow_backbone]
         self.lstm = getLSTM()
 
         # output [mean, std] of Gaussian distribution for frame selection
@@ -48,15 +50,24 @@ class VedioClfNet(nn.Module):
     def forward(self, x, modality):
         """
         :param x: N * C * H * W
-        :param modality: 0-rgb_raw, 1-flow
+        :param modality: N dimension array. 0-rgb_raw, 1-flow
         """
-        # TODO: pick different instances for different modalities
-        # if modality == 0:
-        #     x = self.rgb_backbone(x)
-        # elif modality == 1:
-        #     x = self.flow_backbone(torch.cat((x, torch.zeros((x.shape[0], 1, x.shape[2], x.shape[3]).cuda()))),
-        #                            dim = 1)
-        h, c = self.lstm(x)
+        # pick different instances for different modalities
+
+        # positions of instances of different modalities
+        pos = []
+        y = torch.zeros((x.shape[0], self.config.MODEL.LSTM_INDIM)).cuda()
+        for i in range(self.config.MODEL.MODALITY_NUM):
+            pos.append((modality == i).nonzero().reshape((-1)))
+
+        # feed x into different backbone
+        for i in range(self.config.MODEL.MODALITY_NUM):
+            # if no modality i, then continue
+            if pos[i].shape[0] == 0:
+                continue
+            y[pos[i]] = self.backbone[i](x[pos[i]])
+
+        h, c = self.lstm(y)
         clf_score = self.clf_haed(h)
         # mean, std = self.act_head_frame(h)
         # modality_prob = self.act_head_modality(h)
@@ -80,7 +91,7 @@ class VedioClfNet(nn.Module):
 
         return new_act_frame, new_act_modality, log_pi
 
-    def init_weights(self, batch_size, h_c):
+    def init_weights(self, batch_size, h_c = None):
 
         self.lstm.reset(batch_size, h_c)
 
@@ -96,7 +107,7 @@ def create_model(config, is_train = True):
 
     model = VedioClfNet(config, is_train)
 
-    if is_train and cfg.MODEL.INIT_WEIGHTS:
-        model.init_weights()
+    if is_train and config.MODEL.INIT_WEIGHTS:
+        model.init_weights(config.TRAIN.BATCH_SIZE)
 
     return model

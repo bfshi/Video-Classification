@@ -13,10 +13,16 @@ config = edict()
 
 # common configs
 
-config.GPUS = '0'
+config.GPUS = '0, 1'
 config.WORKERS = 0
-config.DATASET = 'FCVID'
-config.OUTPUT_DIR = 'experiments'
+# config.DATASET = 'FCVID'
+config.OUTPUT_DIR = 'experiments/train_clf'
+
+# Cudnn related params
+config.CUDNN = edict()
+config.CUDNN.BENCHMARK = True
+config.CUDNN.DETERMINISTIC = False
+config.CUDNN.ENABLED = True
 
 # models related configs
 
@@ -30,9 +36,11 @@ config.MODEL.LSTM_OUTDIM = 2048
 config.MODEL.CLFDIM = 200
 config.MODEL.MODALITY_NUM = 2
 
-config.MODEL.RESNET_TYPE = 18
+config.MODEL.RESNET_TYPE = 50
 config.MODEL.INIT_WEIGHTS = True
-config.MODEL.PRETRAINED_PATH = 'pretrained_models/?'
+config.MODEL.PRETRAINED_PATH = 'pretrained_models/resnet50-19c8e357.pth'
+# config.MODEL.PRETRAINED_PATH = 'pretrained_models/resnet101-5d3b4d8f.pth'
+
 
 # training related configs
 
@@ -42,8 +50,8 @@ config.TRAIN.DATAROOT = '/m/shibf/video_classification/data/'
 config.TRAIN.DATASET = 'ActivityNet'
 
 config.TRAIN.LR = 0.001
-config.TRAIN.LR_DECAY_RATE = 1
-config.TRAIN.LR_MILESTONES = []  # at which epoch lr decays
+config.TRAIN.LR_DECAY_RATE = 0.5
+config.TRAIN.LR_MILESTONES = [30, 60, 90]  # at which epoch lr decays
 config.TRAIN.SOFT_UPDATE = 0.005  # 0.005 in SAC paper / 0.01 in rlkit
 
 config.TRAIN.OPTIMIZER = 'adam'
@@ -59,9 +67,9 @@ config.TRAIN.TRAIN_RL_STEP = 10  # num of steps to train policy after every clf_
 config.TRAIN.ROLLOUT_STEP = 1  # num of rollout steps after an action
 
 config.TRAIN.BEGIN_EPOCH = 0
-config.TRAIN.END_EPOCH = 100
+config.TRAIN.END_EPOCH = 120
 
-config.TRAIN.BATCH_SIZE = 32
+config.TRAIN.BATCH_SIZE = 1
 config.TRAIN.RL_BATCH_SIZE = 32
 config.TRAIN.SHUFFLE = True
 
@@ -69,7 +77,13 @@ config.TRAIN.MAX_BUFFER_SIZE = 1000000  # replay buffer size
 
 config.TRAIN.PRINT_EVERY = 100
 
-# testing related ocnfigs
+# classification-only training
+
+config.TRAIN_CLF = edict()
+
+config.TRAIN_CLF.SAMPLE_NUM = 8
+
+# testing related configs
 
 config.TEST = edict()
 

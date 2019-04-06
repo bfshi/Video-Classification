@@ -83,6 +83,7 @@ def rollout(vedio, model, action, value):
     """
 
     with torch.no_grad():
+        return None
 
 def compute_reward(clf_score):
     """
@@ -112,6 +113,16 @@ def soft_update_from_to(source, target, tau):
             target_param.data * (1.0 - tau) + param.data * tau
         )
 
+def compute_acc(score, target):
+    """
+    compute average accuracy
+    :param score: classification score
+    :param target: target label
+    :return: avg_acc
+    """
+    batch_size = target.shape[0]
+    avg_acc = (score.argmax(dim = 1) == target).sum().item() / batch_size
+    return avg_acc
 
 
 
@@ -125,7 +136,7 @@ def create_logger(cfg, phase='train'):
     :return: a logger
     """
     time_str = time.strftime('%Y-%m-%d-%H-%M')
-    log_file = '{}_{}_{}.log'.format(cfg.DATASET, time_str, phase)
+    log_file = '{}_{}_{}.log'.format(cfg.TRAIN.DATASET, time_str, phase)
     final_log_file = Path(cfg.OUTPUT_DIR) / log_file
     log_format = '%(asctime)-15s: %(message)s'
     logging.basicConfig(filename=str(final_log_file),
@@ -145,8 +156,8 @@ def create_logger(cfg, phase='train'):
 GPU wrappers
 """
 
-_use_gpu = True
-device = 'gpu'
+_use_gpu = False
+device = None
 
 
 def set_gpu_mode(mode, gpu_id=0):
