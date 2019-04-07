@@ -37,11 +37,16 @@ def main():
     torch.backends.cudnn.enabled = config.CUDNN.ENABLED
 
     # create a model
-    model = create_model(config, is_train = True)
-
     # use multi gpus in parallel
     gpus = [int(i) for i in config.GPUS.split(',')]
-    model = torch.nn.DataParallel(model, device_ids=gpus).cuda()
+    if not config.TRAIN_CLF.SINGLE_GPU:
+        model = create_model(config, is_train=True).cuda(gpus[0])
+        model = torch.nn.DataParallel(model, device_ids=gpus)
+    else:
+        gpus = [int(i) for i in config.TRAIN_CLF.GPU.split(',')]
+        os.environ["CUDA_VISIBLE_DEVICES"] = config.TRAIN_CLF.GPU
+        model = create_model(config, is_train=True).cuda()
+
 
     # create a Loss class
     criterion = Loss(config).cuda()
@@ -59,21 +64,21 @@ def main():
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
 
-    train_dataset = get_dataset(
-        config,
-        if_train = True,
-        transform = transforms.Compose([
+    transform = transforms.Compose([
+            transforms.Resize((config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W)),
             transforms.ToTensor(),
             normalize,
         ])
+
+    train_dataset = get_dataset(
+        config,
+        if_train = True,
+        transform = transform
     )
     valid_dataset = get_dataset(
         config,
         if_train = False,
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            normalize,
-        ])
+        transform = transform
     )
 
     train_loader = torch.utils.data.DataLoader(
@@ -81,14 +86,15 @@ def main():
         batch_size=config.TRAIN.BATCH_SIZE * len(gpus),
         shuffle=config.TRAIN.SHUFFLE,
         num_workers=config.WORKERS,
-        pin_memory=True
+        pin_memory=True,
+        drop_last=True
     )
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset,
-        batch_size=config.TEST.BATCH_SIZE * len(gpus),
-        shuffle=False,
+        batch_size=config.TRAIN.BATCH_SIZE * len(gpus),
+        shuffle=True,
         num_workers=config.WORKERS,
-        pin_memory=True
+        pin_memory=True,
     )
 
     # training and validating
@@ -97,15 +103,19 @@ def main():
         lr_scheduler.step()
 
         # train for one epoch
-        train_clf(config, train_loader, model, criterion, optimizer, epoch)
+        #train_clf(config, train_loader, model, criterion, optimizer, epoch, transform)
 
         # evaluate on validation set
-        perf_indicator = validate_clf(config, valid_loader, model, criterion, epoch)
+        perf_indicator = validate_clf(config, valid_loader, model, criterion, epoch, transform)
 
         if perf_indicator > best_perf:
+            logger.info("=> saving checkpoint into {}".format(os.path.join(config.OUTPUT_DIR, 'checkpoint.pth')))
             best_perf = perf_indicator
             torch.save(model.state_dict(), os.path.join(config.OUTPUT_DIR, 'checkpoint.pth'))
 
+    logger.info("=> saving final model into {}".format(
+        os.path.join(config.OUTPUT_DIR, 'model_clf_{acc_avg}.pth'.format(acc_avg=best_perf))
+    ))
     torch.save(model.state_dict(),
                os.path.join(config.OUTPUT_DIR, 'model_clf_{acc_avg}.pth'.format(acc_avg=best_perf)))
 

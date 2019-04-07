@@ -65,10 +65,19 @@ class VedioClfNet(nn.Module):
             # if no modality i, then continue
             if pos[i].shape[0] == 0:
                 continue
-            y[pos[i]] = self.backbone[i](x[pos[i]])
+            # print(x.shape, pos[i], x[pos[i]].shape)
+            # print(y.device)
+            # print(list(self.backbone[i].parameters())[0].device)
+            # print(list(self.lstm.parameters())[0].device)
+            # print(list(self.act_head_modality.parameters())[0].device)
+            # y[pos[i]] = self.backbone[i](x[pos[i]])
+            if i == 0:
+                y[pos[i]] = self.rgb_backbone(x[pos[i]])
+            elif i == 1:
+                y[pos[i]] = self.flow_backbone(x[pos[i]])
 
         h, c = self.lstm(y)
-        clf_score = self.clf_haed(h)
+        clf_score = self.clf_head(h)
         # mean, std = self.act_head_frame(h)
         # modality_prob = self.act_head_modality(h)
         # v_value = self.v_head(h)

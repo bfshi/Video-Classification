@@ -13,7 +13,7 @@ config = edict()
 
 # common configs
 
-config.GPUS = '0, 1'
+config.GPUS = '0'
 config.WORKERS = 0
 # config.DATASET = 'FCVID'
 config.OUTPUT_DIR = 'experiments/train_clf'
@@ -24,6 +24,12 @@ config.CUDNN.BENCHMARK = True
 config.CUDNN.DETERMINISTIC = False
 config.CUDNN.ENABLED = True
 
+# dataset related configs
+
+config.ActivityNet = edict()
+config.ActivityNet.FLOW_H = 256
+config.ActivityNet.FLOW_W = 340
+
 # models related configs
 
 config.MODEL = edict()
@@ -31,6 +37,8 @@ config.MODEL = edict()
 config.MODEL.DISCOUNT = 0.99
 config.MODEL.ENTROPY_RATIO = 1
 
+config.MODEL.BACKBONE_INDIM_H = 224
+config.MODEL.BACKBONE_INDIM_W = 224
 config.MODEL.LSTM_INDIM = 2048
 config.MODEL.LSTM_OUTDIM = 2048
 config.MODEL.CLFDIM = 200
@@ -69,19 +77,22 @@ config.TRAIN.ROLLOUT_STEP = 1  # num of rollout steps after an action
 config.TRAIN.BEGIN_EPOCH = 0
 config.TRAIN.END_EPOCH = 120
 
-config.TRAIN.BATCH_SIZE = 1
+config.TRAIN.BATCH_SIZE = 32  # paralleled batch size
 config.TRAIN.RL_BATCH_SIZE = 32
 config.TRAIN.SHUFFLE = True
 
 config.TRAIN.MAX_BUFFER_SIZE = 1000000  # replay buffer size
 
-config.TRAIN.PRINT_EVERY = 100
+config.TRAIN.PRINT_EVERY = 1
 
 # classification-only training
 
 config.TRAIN_CLF = edict()
 
 config.TRAIN_CLF.SAMPLE_NUM = 8
+
+config.TRAIN_CLF.SINGLE_GPU = True
+config.TRAIN_CLF.GPU = '1'  # which to use when SINGLE_GPU == True
 
 # testing related configs
 
@@ -91,7 +102,7 @@ config.TEST.TEST_STEP = 10
 
 config.TEST.BATCH_SIZE = 32
 
-config.TEST.PRINT_EVERY = 100
+config.TEST.PRINT_EVERY = 1
 
 
 

@@ -6,9 +6,19 @@ import os
 import logging
 import time
 from pathlib import Path
+import cv2
+from PIL import Image
+
+import numpy as np
 
 import torch
 import torch.optim as optim
+from torchvision.transforms import ToTensor
+
+import _init_paths
+from core.config import config
+
+totensor = ToTensor()
 
 def create_optimizer(cfg, model):
     """
@@ -69,6 +79,55 @@ def ChooseInput(video, act_frame, act_modality, framenum):
 
     act_frame = int(np.clip(act_frame * (framenum - 1), 0, framenum - 1))
     return video[act_modality][act_frame]
+
+def load_frame(video_path, modality_chosen, frame_chosen, framenum, transform = None):
+    """
+    compute input.
+    :param video_path: ('path1', ..., 'pathN')
+    :param modality_chosen: [m1, ..., mN]
+    :param frame_chosen: [f1, ..., fN] (\in [0, 1])
+    :param [num1, ..., numN]
+    :return: N * C * H * W
+    """
+    frame_chosen = (frame_chosen * (framenum - 1).numpy()).astype(np.int16) + 1
+    batch_size = framenum.shape[0]
+    input = []
+
+    # size of flow feature
+    flow_h = config[config.TRAIN.DATASET].FLOW_H
+    flow_w = config[config.TRAIN.DATASET].FLOW_W
+
+    # load features of each video
+    for i in range(batch_size):
+        # rgb feature
+        # totensor will transpose (H, W, C) to (C, H, W) automatically
+        if modality_chosen[i] == 0:
+            # input.append(transform(cv2.imread(os.path.join(video_path[i], 'img_%.5d.jpg' % frame_chosen[i]),
+            #                        cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)))\
+            input.append(transform(Image.open(os.path.join(video_path[i], 'img_%.5d.jpg' % frame_chosen[i]))))
+        # flow feature
+        # totensor must receive type np.uint8
+        elif modality_chosen[i] == 1:
+            # input.append(np.stack([cv2.imread(os.path.join(video_path[i], 'flow_x_%.5d.jpg' % frame_chosen[i]),
+            #                       cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION),
+            #                        cv2.imread(os.path.join(video_path[i], 'flow_y_%.5d.jpg' % frame_chosen[i]),
+            #                       cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION),
+            #                        np.zeros((config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W))],
+            #                       axis = -1).astype(np.uint8)
+            #              )
+            input.append(torch.cat((transform(Image.open(os.path.join(video_path[i],
+                                                                     'flow_x_%.5d.jpg' % frame_chosen[i])).convert('L')),
+                                   transform(Image.open(os.path.join(video_path[i],
+                                                                     'flow_y_%.5d.jpg' % frame_chosen[i])).convert('L')),
+                                   torch.zeros((1, config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W))))
+                         )
+            # TODO: some flow.jpg have 3 channel???
+            #  "RuntimeError: invalid argument 0: Sizes of tensors must match except in dimension 0.
+            #  Got 3 and 7 in dimension 1" in "torch.stack(input)"
+
+    return torch.stack(input)
+
+
 
 
 def rollout(vedio, model, action, value):

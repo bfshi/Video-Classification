@@ -117,40 +117,40 @@ class ActivityNet(VideoSet):
         :param idx: index of item
         :return: input, label_idx, meta = {'framenum': xxx, 'label': 'label_name'}
         """
-        print(idx)
         item_info = self.video_info[idx]
         frame_flow_path = os.path.join(self.config.TRAIN.DATAROOT, self.config.TRAIN.DATASET,
                                        'frame_flow', item_info['name'])
 
-        # read rgb features
-        rgb_feature_list = [np.transpose(cv2.imread(os.path.join(frame_flow_path, 'img_%.5d.jpg' % i),
-                                  cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION), (2, 0, 1))
-                       for i in range(1, item_info['metadata']['framenum'] + 1)]
-        rgb_feature = np.stack(rgb_feature_list)
-
-        # read flow features
-        # x_channel + y_channel + zero_channel (for size compatibility)
-        flow_feature_list = [np.stack([cv2.imread(os.path.join(frame_flow_path, 'flow_x_%.5d.jpg' % i),
-                                  cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION),
-                                      cv2.imread(os.path.join(frame_flow_path, 'flow_y_%.5d.jpg' % i),
-                                  cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION),
-                                       np.zeros((rgb_feature.shape[2], rgb_feature.shape[3]))]
-                             ) for i in range(1, item_info['metadata']['framenum'] + 1)]
-        flow_feature = np.stack(flow_feature_list)
-
-        # transform
-        if self.rgb_transform:
-            rgb_feature = self.rgb_transform(rgb_feature)
-            flow_feature = self.flow_transform(flow_feature)
-
-        input = [rgb_feature, flow_feature]
+        # # read rgb features
+        # rgb_feature_list = [np.transpose(cv2.imread(os.path.join(frame_flow_path, 'img_%.5d.jpg' % i),
+        #                           cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION), (2, 0, 1))
+        #                for i in range(1, item_info['metadata']['framenum'] + 1)]
+        # rgb_feature = np.stack(rgb_feature_list)
+        #
+        # # read flow features
+        # # x_channel + y_channel + zero_channel (for size compatibility)
+        # flow_feature_list = [np.stack([cv2.imread(os.path.join(frame_flow_path, 'flow_x_%.5d.jpg' % i),
+        #                           cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION),
+        #                               cv2.imread(os.path.join(frame_flow_path, 'flow_y_%.5d.jpg' % i),
+        #                           cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION),
+        #                                np.zeros((rgb_feature.shape[2], rgb_feature.shape[3]))]
+        #                      ) for i in range(1, item_info['metadata']['framenum'] + 1)]
+        # flow_feature = np.stack(flow_feature_list)
+        #
+        # # transform
+        # # TODO: TOTensor only accept input of size (H, W, C)!
+        # if self.rgb_transform:
+        #     rgb_feature = self.rgb_transform(rgb_feature)
+        #     flow_feature = self.flow_transform(flow_feature)
+        #
+        # input = [rgb_feature, flow_feature]
 
         label_idx = self.label_dic[item_info['label']]
 
         meta = item_info['metadata']
         meta['label'] = item_info['label']
 
-        return input, label_idx, meta
+        return frame_flow_path, label_idx, meta
 
 
 def get_dataset(config, if_train = True, transform = None):
