@@ -13,7 +13,7 @@ config = edict()
 
 # common configs
 
-config.GPUS = '0'
+config.GPUS = '0, 1'
 config.WORKERS = 0
 # config.DATASET = 'FCVID'
 config.OUTPUT_DIR = 'experiments/train_clf'
@@ -91,7 +91,7 @@ config.TRAIN_CLF = edict()
 
 config.TRAIN_CLF.SAMPLE_NUM = 8
 
-config.TRAIN_CLF.SINGLE_GPU = True
+config.TRAIN_CLF.SINGLE_GPU = False
 config.TRAIN_CLF.GPU = '1'  # which to use when SINGLE_GPU == True
 
 # testing related configs

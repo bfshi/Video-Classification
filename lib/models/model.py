@@ -11,15 +11,48 @@ from models.backbone import getBackbone
 from models.lstm import getLSTM
 from utils.utils import soft_update_from_to
 
+class Backbones(nn.Module):
+    def __init__(self, config, is_train = True):
+        super(Backbones, self).__init__()
+
+        self.config = config
+        self.rgb_backbone = getBackbone(config, is_train)
+        self.flow_backbone = getBackbone(config, is_train)
+
+    def forward(self, x, modality):
+        # pick different instances for different modalities
+
+        # positions of instances of different modalities
+        pos = []
+        y = torch.zeros((x.shape[0], self.config.MODEL.LSTM_INDIM)).cuda()
+        for i in range(self.config.MODEL.MODALITY_NUM):
+            pos.append((modality == i).nonzero().reshape((-1)))
+
+        # feed x into different backbone
+        for i in range(self.config.MODEL.MODALITY_NUM):
+            # if no modality i, then continue
+            if pos[i].shape[0] == 0:
+                continue
+            # print(x.shape, pos[i], x[pos[i]].shape)
+            # print(y.device)
+            # print(list(self.backbone[i].parameters())[0].device)
+            # print(list(self.lstm.parameters())[0].device)
+            # print(list(self.act_head_modality.parameters())[0].device)
+            # y[pos[i]] = self.backbone[i](x[pos[i]])
+            if i == 0:
+                y[pos[i]] = self.rgb_backbone(x[pos[i]])
+            elif i == 1:
+                y[pos[i]] = self.flow_backbone(x[pos[i]])
+
+        return y
+
 
 class VedioClfNet(nn.Module):
     def __init__(self, config, is_train = True):
         super(VedioClfNet, self).__init__()
 
         self.config = config
-        self.rgb_backbone = getBackbone(config, is_train)
-        self.flow_backbone = getBackbone(config, is_train)
-        self.backbone = [self.rgb_backbone, self.flow_backbone]
+        self.backbones = Backbones(config, is_train=is_train)
         self.lstm = getLSTM()
 
         # output [mean, std] of Gaussian distribution for frame selection
@@ -52,30 +85,7 @@ class VedioClfNet(nn.Module):
         :param x: N * C * H * W
         :param modality: N dimension array. 0-rgb_raw, 1-flow
         """
-        # pick different instances for different modalities
-
-        # positions of instances of different modalities
-        pos = []
-        y = torch.zeros((x.shape[0], self.config.MODEL.LSTM_INDIM)).cuda()
-        for i in range(self.config.MODEL.MODALITY_NUM):
-            pos.append((modality == i).nonzero().reshape((-1)))
-
-        # feed x into different backbone
-        for i in range(self.config.MODEL.MODALITY_NUM):
-            # if no modality i, then continue
-            if pos[i].shape[0] == 0:
-                continue
-            # print(x.shape, pos[i], x[pos[i]].shape)
-            # print(y.device)
-            # print(list(self.backbone[i].parameters())[0].device)
-            # print(list(self.lstm.parameters())[0].device)
-            # print(list(self.act_head_modality.parameters())[0].device)
-            # y[pos[i]] = self.backbone[i](x[pos[i]])
-            if i == 0:
-                y[pos[i]] = self.rgb_backbone(x[pos[i]])
-            elif i == 1:
-                y[pos[i]] = self.flow_backbone(x[pos[i]])
-
+        y = self.backbones(x, modality)
         h, c = self.lstm(y)
         clf_score = self.clf_head(h)
         # mean, std = self.act_head_frame(h)

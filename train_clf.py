@@ -41,7 +41,7 @@ def main():
     gpus = [int(i) for i in config.GPUS.split(',')]
     if not config.TRAIN_CLF.SINGLE_GPU:
         model = create_model(config, is_train=True).cuda(gpus[0])
-        model = torch.nn.DataParallel(model, device_ids=gpus)
+        model.backbones = torch.nn.DataParallel(model.backbones, device_ids=gpus)
     else:
         gpus = [int(i) for i in config.TRAIN_CLF.GPU.split(',')]
         os.environ["CUDA_VISIBLE_DEVICES"] = config.TRAIN_CLF.GPU

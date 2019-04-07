@@ -257,10 +257,7 @@ def train_clf(config, train_loader, model, criterion, optimizer, epoch, transfor
         # use paralleled batch-size instead of total batch-size!!!
         ob = (torch.zeros((config.TRAIN.BATCH_SIZE, config.MODEL.LSTM_OUTDIM)).cuda(),
               torch.zeros((config.TRAIN.BATCH_SIZE, config.MODEL.LSTM_OUTDIM)).cuda())
-        if not config.TRAIN_CLF.SINGLE_GPU:
-            model.module.init_weights(config.TRAIN.BATCH_SIZE, ob)
-        else:
-            model.init_weights(config.TRAIN.BATCH_SIZE, ob)
+        model.init_weights(config.TRAIN.BATCH_SIZE, ob)
 
         total_batch_size = target.shape[0]
 
@@ -349,10 +346,7 @@ def validate_clf(config, val_loader, model, criterion, epoch, transform = None):
             # ob = (h, c)
             ob = (torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda(),
                   torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda())
-            if not config.TRAIN_CLF.SINGLE_GPU:
-                model.module.init_weights(config.TRAIN.BATCH_SIZE, ob)
-            else:
-                model.init_weights(config.TRAIN.BATCH_SIZE, ob)
+            model.init_weights(config.TRAIN.BATCH_SIZE, ob)
 
             total_batch_size = target.shape[0]
 
