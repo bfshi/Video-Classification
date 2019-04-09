@@ -249,15 +249,18 @@ def train_clf(config, train_loader, model, criterion, optimizer, epoch, transfor
 
     end = time.time()
     for i, (video_path, target, meta) in enumerate(train_loader):
+        # clear cache
+        # torch.cuda.empty_cache()
+
         # measure data loading time
         data_time.update(time.time() - end)
 
-        # initialize the observation
+        # initialize the observation for lstm
         # ob = (h, c)
         # use paralleled batch-size instead of total batch-size!!!
-        ob = (torch.zeros((config.TRAIN.BATCH_SIZE, config.MODEL.LSTM_OUTDIM)).cuda(),
-              torch.zeros((config.TRAIN.BATCH_SIZE, config.MODEL.LSTM_OUTDIM)).cuda())
-        model.init_weights(config.TRAIN.BATCH_SIZE, ob)
+        ob = (torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda(),
+              torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda())
+        model.init_weights(target.shape[0], ob)
 
         total_batch_size = target.shape[0]
 
@@ -278,7 +281,7 @@ def train_clf(config, train_loader, model, criterion, optimizer, epoch, transfor
                                meta['framenum'], transform)
 
             # compute output
-            _, clf_score = model(input.cuda(), modality_chosen[:, j].cuda())
+            _, clf_score = model(input.cuda(), modality_chosen[:, j].cuda(), config.TRAIN_CLF.IF_LSTM)
 
             # accumulate clf_score
             clf_score_sum += clf_score
@@ -346,7 +349,7 @@ def validate_clf(config, val_loader, model, criterion, epoch, transform = None):
             # ob = (h, c)
             ob = (torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda(),
                   torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda())
-            model.init_weights(config.TRAIN.BATCH_SIZE, ob)
+            model.init_weights(target.shape[0], ob)
 
             total_batch_size = target.shape[0]
 
@@ -366,7 +369,7 @@ def validate_clf(config, val_loader, model, criterion, epoch, transform = None):
                                    meta['framenum'], transform)
 
                 # compute output
-                _, clf_score = model(input.cuda(), modality_chosen[:, j].cuda())
+                _, clf_score = model(input.cuda(), modality_chosen[:, j].cuda(), config.TRAIN_CLF.IF_LSTM)
 
                 # accumulate clf_score
                 clf_score_sum += clf_score

@@ -2,10 +2,15 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import logging
+
+import torch
 import torch.nn as nn
 
 import _init_paths
 from core.config import config
+
+logger = logging.getLogger(__name__)
 
 class Loss(nn.Module):
     def __init__(self, config):
@@ -20,6 +25,9 @@ class Loss(nn.Module):
 
     def clf_loss(self, score, y):
 
+        logger.info(score.shape)
+        temp = torch.exp(score)
+        logger.info((temp[range(temp.shape[0]), y] / temp.sum(dim = 1)).mean())
         clf_loss = self.cross_entropy(score, y)
 
         return clf_loss

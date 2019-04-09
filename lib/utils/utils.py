@@ -13,6 +13,7 @@ import numpy as np
 
 import torch
 import torch.optim as optim
+import torch.nn as nn
 from torchvision.transforms import ToTensor
 
 import _init_paths
@@ -154,7 +155,7 @@ def compute_reward(clf_score):
     clf_score = torch.nn.functional.softmax(clf_score, dim = 1)
     maxv, maxpos = clf_score.max(dim = 1)
     minv, _ = clf_score.min(dim = 1)
-    clf_score[:, maxpos] = minv
+    clf_score[range(clf_score.shape[0]), maxpos] = minv
     second_maxv, _ = clf_score.max()
     return torch.log(maxv / second_maxv)
 
@@ -287,3 +288,4 @@ def tensor(*args, torch_device=None, **kwargs):
 
 def normal(*args, **kwargs):
     return torch.normal(*args, **kwargs).to(device)
+

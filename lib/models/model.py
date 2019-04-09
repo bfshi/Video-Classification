@@ -80,14 +80,19 @@ class VedioClfNet(nn.Module):
         # output soft state-action value
         self.q_head = nn.Linear(config.MODEL.LSTM_OUTDIM + 1 + 1, 1)
 
-    def forward(self, x, modality):
+    def forward(self, x, modality, if_lstm = True):
         """
         :param x: N * C * H * W
         :param modality: N dimension array. 0-rgb_raw, 1-flow
         """
         y = self.backbones(x, modality)
-        h, c = self.lstm(y)
-        clf_score = self.clf_head(h)
+        if if_lstm:
+            h, c = self.lstm(y)
+            clf_score = self.clf_head(h)
+        else:
+            h = None
+            c = None
+            clf_score = self.clf_head(y)
         # mean, std = self.act_head_frame(h)
         # modality_prob = self.act_head_modality(h)
         # v_value = self.v_head(h)
@@ -106,7 +111,7 @@ class VedioClfNet(nn.Module):
         new_act_modality = torch.multinomial(modality_prob, num_samples=1, replacement=True)
         log_pi = -torch.log((2 * np.pi) ** 0.5 * std) - \
                  (new_act_frame - mean).pow(2) / (2 * std.pow(2)) + \
-                 torch.log(modality_prob[:, new_act_modality])
+                 torch.log(modality_prob[range(modality_prob.shape[0]), new_act_modality])
 
         return new_act_frame, new_act_modality, log_pi
 

@@ -53,6 +53,14 @@ class ActivityNet(VideoSet):
         """
         load video_info and label_dic
         """
+        # load label_idx
+        with open(self.config.TRAIN.DATAROOT + self.config.TRAIN.DATASET
+                  + '/label_index.csv', 'r') as labelfile:
+            reader = csv.DictReader(labelfile)
+            for line in reader:
+                self.label_dic[line['label']] = int(line['label_idx'])
+
+        # load video info from .json
         with open(self.config.TRAIN.DATAROOT + self.config.TRAIN.DATASET +
                   '/activity_net.v1-3.min.json', 'r') as annfile:
             anndata = json.load(annfile)
@@ -72,8 +80,7 @@ class ActivityNet(VideoSet):
                 'label': v['annotations'][0]['label']
             }
 
-        # load framenum and record labels
-        label_cnt = 0
+        # load framenum
 
         # using numFrame in video_numframe_correction.csv which is precise.
 
@@ -86,12 +93,11 @@ class ActivityNet(VideoSet):
                 for line, correction_line in zip(lines, correction_lines):
                     if line['subset'] != self.mode:
                         continue
+                    if line['video'][2:] in self.config.ActivityNet.BLOCKED_VIDEO:
+                        continue
                     line['video'] = line['video'][2:]
                     video_info_dict[line['video']]['metadata']['framenum'] = int(correction_line['numFrame'])
                     self.video_info.append(video_info_dict[line['video']])
-                    if video_info_dict[line['video']]['label'] not in self.label_dic:
-                        self.label_dic[video_info_dict[line['video']]['label']] = label_cnt
-                        label_cnt += 1
 
         # count number of frames for each video
         # video_info is sorted in alphabetic order

@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import os
 import yaml
+import csv
 
 import numpy as np
 from easydict import EasyDict as edict
@@ -29,6 +30,9 @@ config.CUDNN.ENABLED = True
 config.ActivityNet = edict()
 config.ActivityNet.FLOW_H = 256
 config.ActivityNet.FLOW_W = 340
+config.ActivityNet.INCOMPLETE_VIDEO = 'incomplete_video.csv'
+config.ActivityNet.BLANK_VIDEO = 'blank_video.csv'
+config.ActivityNet.BLOCKED_VIDEO = []  # incomplete frames(loaded in L112)
 
 # models related configs
 
@@ -77,7 +81,7 @@ config.TRAIN.ROLLOUT_STEP = 1  # num of rollout steps after an action
 config.TRAIN.BEGIN_EPOCH = 0
 config.TRAIN.END_EPOCH = 120
 
-config.TRAIN.BATCH_SIZE = 32  # paralleled batch size
+config.TRAIN.BATCH_SIZE = 16  # paralleled batch size per gpu
 config.TRAIN.RL_BATCH_SIZE = 32
 config.TRAIN.SHUFFLE = True
 
@@ -89,7 +93,9 @@ config.TRAIN.PRINT_EVERY = 1
 
 config.TRAIN_CLF = edict()
 
-config.TRAIN_CLF.SAMPLE_NUM = 8
+config.TRAIN_CLF.SAMPLE_NUM = 5
+
+config.TRAIN_CLF.IF_LSTM = False
 
 config.TRAIN_CLF.SINGLE_GPU = False
 config.TRAIN_CLF.GPU = '1'  # which to use when SINGLE_GPU == True
@@ -105,5 +111,13 @@ config.TEST.BATCH_SIZE = 32
 config.TEST.PRINT_EVERY = 1
 
 
+dataset = config.TRAIN.DATASET
+with open(os.path.join(config.TRAIN.DATAROOT, config.TRAIN.DATASET,
+          config[dataset].INCOMPLETE_VIDEO), 'r') as correction_file:
+    reader = csv.reader(correction_file)
+    config[dataset].BLOCKED_VIDEO.extend(list(reader)[0])
 
-
+with open(os.path.join(config.TRAIN.DATAROOT, config.TRAIN.DATASET,
+          config[dataset].BLANK_VIDEO), 'r') as correction_file:
+    reader = csv.reader(correction_file)
+    config[dataset].BLOCKED_VIDEO.extend(list(reader)[0])

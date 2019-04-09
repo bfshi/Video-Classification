@@ -37,16 +37,14 @@ def main():
     torch.backends.cudnn.enabled = config.CUDNN.ENABLED
 
     # create a model
-    # use multi gpus in parallel
     gpus = [int(i) for i in config.GPUS.split(',')]
-    if not config.TRAIN_CLF.SINGLE_GPU:
+    if not config.TRAIN_CLF.SINGLE_GPU:  # use multi gpus in parallel
         model = create_model(config, is_train=True).cuda(gpus[0])
         model.backbones = torch.nn.DataParallel(model.backbones, device_ids=gpus)
-    else:
+    else:  # use single gpu
         gpus = [int(i) for i in config.TRAIN_CLF.GPU.split(',')]
         os.environ["CUDA_VISIBLE_DEVICES"] = config.TRAIN_CLF.GPU
         model = create_model(config, is_train=True).cuda()
-
 
     # create a Loss class
     criterion = Loss(config).cuda()
@@ -92,18 +90,19 @@ def main():
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset,
         batch_size=config.TRAIN.BATCH_SIZE * len(gpus),
-        shuffle=True,
+        shuffle=False,
         num_workers=config.WORKERS,
         pin_memory=True,
     )
 
     # training and validating
     best_perf = 0
+    perf_indicator = 0
     for epoch in range(config.TRAIN.BEGIN_EPOCH, config.TRAIN.END_EPOCH):
         lr_scheduler.step()
 
         # train for one epoch
-        #train_clf(config, train_loader, model, criterion, optimizer, epoch, transform)
+        train_clf(config, train_loader, model, criterion, optimizer, epoch, transform)
 
         # evaluate on validation set
         perf_indicator = validate_clf(config, valid_loader, model, criterion, epoch, transform)
