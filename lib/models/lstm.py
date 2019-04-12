@@ -27,10 +27,10 @@ class LSTM(nn.Module):
             self.c = h_c[1]
 
     def forward(self, input):
-        # self.h, self.c = self.lstm(input, (self.h, self.c))
-        # return self.h, self.c
-        h, c = self.lstm(input, (self.h, self.c))
-        return h, c
+        self.h, self.c = self.lstm(input, (self.h, self.c))
+        return self.h, self.c
+        # h, c = self.lstm(input, (self.h, self.c))
+        # return h, c
 
 
 

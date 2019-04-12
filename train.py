@@ -28,6 +28,9 @@ from utils.replay_buffer import create_replay_buffer
 
 
 def main():
+    # convert to train mode
+    config.MODE = 'train'
+
     #create a logger
     logger = create_logger(config, 'train')
 
@@ -36,12 +39,25 @@ def main():
     torch.backends.cudnn.deterministic = config.CUDNN.DETERMINISTIC
     torch.backends.cudnn.enabled = config.CUDNN.ENABLED
 
-    #create a model
-    model = create_model(config, is_train = True)
-
-    #use multi gpus in parallel
+    # create a model
     gpus = [int(i) for i in config.GPUS.split(',')]
-    model = torch.nn.DataParallel(model, device_ids=gpus).cuda()
+    model = create_model(config, is_train=True)
+
+    if config.TRAIN.RESUME:
+        model.load_state_dict(torch.load(config.TRAIN.STATE_DICT), strict=False)
+
+    if not config.TRAIN.SINGLE_GPU:  # use multi gpus in parallel
+        model = model.cuda(gpus[0])
+        model.backbones = torch.nn.DataParallel(model.backbones, device_ids=gpus)
+    else:  # use single gpu
+        gpus = [int(i) for i in config.TRAIN.GPU.split(',')]
+        os.environ["CUDA_VISIBLE_DEVICES"] = config.TRAIN_CLF.GPU
+        model = model.cuda()
+
+    # whether to train backbones
+    if not config.TRAIN.IF_TRAIN_BACKBONE:
+        for param in model.backbones.parameters():
+            param.requires_grad = False
 
     #create a Loss class
     criterion = Loss(config).cuda()
@@ -58,25 +74,25 @@ def main():
     #create a new replay buffer
     replay_buffer = create_replay_buffer()
 
-    #load data
+    # load data
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
 
+    transform = transforms.Compose([
+        transforms.Resize((config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W)),
+        transforms.ToTensor(),
+        normalize,
+    ])
+
     train_dataset = get_dataset(
         config,
-        if_train = True,
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            normalize,
-        ])
+        if_train=True,
+        transform=transform
     )
     valid_dataset = get_dataset(
         config,
-        if_train = False,
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            normalize,
-        ])
+        if_train=False,
+        transform=transform
     )
 
     train_loader = torch.utils.data.DataLoader(
@@ -84,7 +100,8 @@ def main():
         batch_size=config.TRAIN.BATCH_SIZE * len(gpus),
         shuffle=config.TRAIN.SHUFFLE,
         num_workers=config.WORKERS,
-        pin_memory=True
+        pin_memory=True,
+        drop_last=True
     )
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset,
@@ -96,18 +113,27 @@ def main():
 
     #training and validating
     best_perf =
+    perf_indicator =
     for epoch in range(config.TRAIN.BEGIN_EPOCH, config.TRAIN.END_EPOCH):
         lr_scheduler.step()
 
         # train for one epoch
-        train(config, train_loader, model, criterion, optimizer, epoch, replay_buffer)
+        train(config, train_loader, model, criterion, optimizer, epoch, replay_buffer, transform)
 
         # evaluate on validation set
-        perf_indicator = validate(config, valid_loader, model, criterion, epoch)
+        if (epoch + 1) % config.TEST.TEST_EVERY == 0:
+            perf_indicator = validate(config, valid_loader, model, criterion, epoch, transform)
 
-        if perf_indicator > best_perf:
-            best_perf = perf_indicator
-            #TODO: save the model
+            if perf_indicator > best_perf:
+                logger.info("=> saving checkpoint into {}".format(os.path.join(config.OUTPUT_DIR, 'checkpoint_{}.pth'.format(best_perf))))
+                best_perf = perf_indicator
+                torch.save(model.state_dict(), os.path.join(config.OUTPUT_DIR, 'checkpoint_{}.pth'.format(best_perf)))
+
+    logger.info("=> saving final model into {}".format(
+        os.path.join(config.OUTPUT_DIR, 'model_{}.pth'.format(perf_indicator))
+    ))
+    torch.save(model.state_dict(),
+               os.path.join(config.OUTPUT_DIR, 'model_{}.pth'.format(perf_indicator)))
 
 
 if __name__ == '__main__':

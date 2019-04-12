@@ -81,6 +81,29 @@ def ChooseInput(video, act_frame, act_modality, framenum):
     act_frame = int(np.clip(act_frame * (framenum - 1), 0, framenum - 1))
     return video[act_modality][act_frame]
 
+def choose_frame_randomly(batch_size, sample_num):
+    """
+    randomly choose frames
+    """
+    offset = np.random.rand(batch_size, 1) / sample_num
+    # offset = np.ones((batch_size, 1), dtype=np.float32) / sample_num / 2
+    frame_chosen = np.tile(np.array(range(sample_num)).astype(np.float32) / sample_num, (batch_size, 1)) + \
+                   offset
+    # frame_chosen = np.random.rand(batch_size, sample_num) / sample_num
+    # for i in range(1, sample_num):
+    #     frame_chosen[:, i] = frame_chosen[:, i - 1] + 1.0 / sample_num
+    return frame_chosen
+
+def choose_modality_randomly(batch_size, modality_num, sample_num):
+    """
+    randomly choose modalities
+    """
+    # modality_chosen should be longTensor instead of np.array because it will be fed into
+    # paralleled model and only Tensor can be split into paralleled pieces automatically.
+    modality_chosen = torch.LongTensor(np.random.randint(0, modality_num,
+                                                         size=(batch_size, sample_num)))
+    return modality_chosen
+
 def load_frame(video_path, modality_chosen, frame_chosen, framenum, transform = None):
     """
     compute input.
@@ -172,6 +195,7 @@ def soft_update_from_to(source, target, tau):
         target_param.data.copy_(
             target_param.data * (1.0 - tau) + param.data * tau
         )
+
 
 def compute_acc(score, target):
     """

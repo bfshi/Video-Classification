@@ -5,6 +5,7 @@ from __future__ import print_function
 import numpy as np
 import torch
 import torch.nn as nn
+from collections import OrderedDict
 
 import _init_paths
 from models.backbone import getBackbone
@@ -118,6 +119,14 @@ class VedioClfNet(nn.Module):
     def init_weights(self, batch_size, h_c = None):
 
         self.lstm.reset(batch_size, h_c)
+
+    def my_load_state_dict(self, state_dict_old, strict=True):
+        state_dict = OrderedDict()
+        # delete 'module.' because it is saved from DataParallel module
+        for key in state_dict_old.keys():
+            state_dict[key.replace('module.', '')] = state_dict_old[key]
+
+        self.load_state_dict(state_dict, strict=strict)
 
 
 def create_model(config, is_train = True):

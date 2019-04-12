@@ -25,9 +25,9 @@ class Loss(nn.Module):
 
     def clf_loss(self, score, y):
 
-        logger.info(score.shape)
-        temp = torch.exp(score)
-        logger.info((temp[range(temp.shape[0]), y] / temp.sum(dim = 1)).mean())
+        # logger.info(score.shape)
+        # temp = torch.exp(score)
+        # logger.info((temp[range(temp.shape[0]), y] / temp.sum(dim = 1)).mean())
         clf_loss = self.cross_entropy(score, y)
 
         return clf_loss

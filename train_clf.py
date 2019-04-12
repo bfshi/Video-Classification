@@ -28,6 +28,9 @@ from utils.replay_buffer import create_replay_buffer
 
 
 def main():
+    # convert to train_clf mode
+    config.MODE = 'train_clf'
+
     # create a logger
     logger = create_logger(config, 'train')
 
@@ -38,13 +41,18 @@ def main():
 
     # create a model
     gpus = [int(i) for i in config.GPUS.split(',')]
+    model = create_model(config, is_train=True)
+
+    if config.TRAIN.RESUME:
+        model.my_load_state_dict(torch.load(config.TRAIN.STATE_DICT), strict=True)
+
     if not config.TRAIN_CLF.SINGLE_GPU:  # use multi gpus in parallel
-        model = create_model(config, is_train=True).cuda(gpus[0])
+        model = model.cuda(gpus[0])
         model.backbones = torch.nn.DataParallel(model.backbones, device_ids=gpus)
     else:  # use single gpu
         gpus = [int(i) for i in config.TRAIN_CLF.GPU.split(',')]
         os.environ["CUDA_VISIBLE_DEVICES"] = config.TRAIN_CLF.GPU
-        model = create_model(config, is_train=True).cuda()
+        model = model.cuda()
 
     # create a Loss class
     criterion = Loss(config).cuda()
@@ -105,18 +113,19 @@ def main():
         train_clf(config, train_loader, model, criterion, optimizer, epoch, transform)
 
         # evaluate on validation set
-        perf_indicator = validate_clf(config, valid_loader, model, criterion, epoch, transform)
+        if (epoch + 1) % config.TEST.TEST_EVERY == 0:
+            perf_indicator = validate_clf(config, valid_loader, model, criterion, epoch, transform)
 
-        if perf_indicator > best_perf:
-            logger.info("=> saving checkpoint into {}".format(os.path.join(config.OUTPUT_DIR, 'checkpoint.pth')))
-            best_perf = perf_indicator
-            torch.save(model.state_dict(), os.path.join(config.OUTPUT_DIR, 'checkpoint.pth'))
+            if perf_indicator > best_perf:
+                logger.info("=> saving checkpoint into {}".format(os.path.join(config.OUTPUT_DIR, 'checkpoint.pth')))
+                best_perf = perf_indicator
+                torch.save(model.state_dict(), os.path.join(config.OUTPUT_DIR, 'checkpoint.pth'))
 
     logger.info("=> saving final model into {}".format(
-        os.path.join(config.OUTPUT_DIR, 'model_clf_{acc_avg}.pth'.format(acc_avg=best_perf))
+        os.path.join(config.OUTPUT_DIR, 'model_clf_{acc_avg}.pth'.format(acc_avg=perf_indicator))
     ))
     torch.save(model.state_dict(),
-               os.path.join(config.OUTPUT_DIR, 'model_clf_{acc_avg}.pth'.format(acc_avg=best_perf)))
+               os.path.join(config.OUTPUT_DIR, 'model_clf_{acc_avg}.pth'.format(acc_avg=perf_indicator)))
 
 
 if __name__ == '__main__':

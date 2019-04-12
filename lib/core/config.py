@@ -16,8 +16,8 @@ config = edict()
 
 config.GPUS = '0, 1'
 config.WORKERS = 0
-# config.DATASET = 'FCVID'
-config.OUTPUT_DIR = 'experiments/train_clf'
+# config.DATASET = 'ActivityNet'
+config.MODE = 'train_clf'  # train / train_clf
 
 # Cudnn related params
 config.CUDNN = edict()
@@ -58,6 +58,14 @@ config.MODEL.PRETRAINED_PATH = 'pretrained_models/resnet50-19c8e357.pth'
 
 config.TRAIN = edict()
 
+config.TRAIN.RESUME = True  # whether to continue previous training
+config.TRAIN.STATE_DICT = 'checkpoint.pth'
+
+config.TRAIN.SINGLE_GPU = False
+config.TRAIN.GPU = '1'  # which to use when SINGLE_GPU == True
+
+config.TRAIN.IF_TRAIN_BACKBONE = False
+
 config.TRAIN.DATAROOT = '/m/shibf/video_classification/data/'
 config.TRAIN.DATASET = 'ActivityNet'
 
@@ -78,7 +86,7 @@ config.TRAIN.TRAIN_CLF_STEP = 10  # num of steps to train classification head on
 config.TRAIN.TRAIN_RL_STEP = 10  # num of steps to train policy after every clf_train
 config.TRAIN.ROLLOUT_STEP = 1  # num of rollout steps after an action
 
-config.TRAIN.BEGIN_EPOCH = 0
+config.TRAIN.BEGIN_EPOCH = 4
 config.TRAIN.END_EPOCH = 120
 
 config.TRAIN.BATCH_SIZE = 16  # paralleled batch size per gpu
@@ -104,11 +112,20 @@ config.TRAIN_CLF.GPU = '1'  # which to use when SINGLE_GPU == True
 
 config.TEST = edict()
 
+config.TEST.TEST_EVERY = 5
+
 config.TEST.TEST_STEP = 10
 
 config.TEST.BATCH_SIZE = 32
 
 config.TEST.PRINT_EVERY = 1
+
+# extra
+
+config.OUTPUT_DIR = os.path.join('experiments/', config.TRAIN.DATASET,
+                                 'resnet{}'.format(config.MODEL.RESNET_TYPE), config.MODE)
+
+config.TRAIN.STATE_DICT = os.path.join(config.OUTPUT_DIR, config.TRAIN.STATE_DICT)
 
 
 dataset = config.TRAIN.DATASET
