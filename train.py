@@ -31,8 +31,11 @@ def main():
     # convert to train mode
     config.MODE = 'train'
 
-    #create a logger
+    # create a logger
     logger = create_logger(config, 'train')
+
+    # logging configurations
+    logger.info(pprint.pformat(config))
 
     # cudnn related setting
     cudnn.benchmark = config.CUDNN.BENCHMARK
@@ -40,17 +43,19 @@ def main():
     torch.backends.cudnn.enabled = config.CUDNN.ENABLED
 
     # create a model
-    gpus = [int(i) for i in config.GPUS.split(',')]
+    os.environ["CUDA_VISIBLE_DEVICES"] = config.GPUS
+    # gpus = [int(i) for i in config.GPUS.split(',')]
+    gpus = range(config.GPU_NUM)
     model = create_model(config, is_train=True)
 
     if config.TRAIN.RESUME:
-        model.load_state_dict(torch.load(config.TRAIN.STATE_DICT), strict=False)
+        model.my_load_state_dict(torch.load(config.TRAIN.STATE_DICT), strict=True)
 
-    if not config.TRAIN.SINGLE_GPU:  # use multi gpus in parallel
+    if not config.TRAIN_CLF.SINGLE_GPU:  # use multi gpus in parallel
         model = model.cuda(gpus[0])
         model.backbones = torch.nn.DataParallel(model.backbones, device_ids=gpus)
     else:  # use single gpu
-        gpus = [int(i) for i in config.TRAIN.GPU.split(',')]
+        gpus = [int(i) for i in config.TRAIN_CLF.GPU.split(',')]
         os.environ["CUDA_VISIBLE_DEVICES"] = config.TRAIN_CLF.GPU
         model = model.cuda()
 
@@ -84,6 +89,14 @@ def main():
         normalize,
     ])
 
+    normalize_gray = transforms.Normalize(mean=[0.456], std=[0.224])
+
+    transform_gray = transforms.Compose([
+        transforms.Resize((config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W)),
+        transforms.ToTensor(),
+        normalize_gray,
+    ])
+
     train_dataset = get_dataset(
         config,
         if_train=True,
@@ -112,17 +125,16 @@ def main():
     )
 
     #training and validating
-    best_perf =
-    perf_indicator =
+    best_perf = 0
     for epoch in range(config.TRAIN.BEGIN_EPOCH, config.TRAIN.END_EPOCH):
         lr_scheduler.step()
 
         # train for one epoch
-        train(config, train_loader, model, criterion, optimizer, epoch, replay_buffer, transform)
+        train(config, train_loader, model, criterion, optimizer, epoch, replay_buffer, transform, transform_gray)
 
         # evaluate on validation set
         if (epoch + 1) % config.TEST.TEST_EVERY == 0:
-            perf_indicator = validate(config, valid_loader, model, criterion, epoch, transform)
+            perf_indicator = validate(config, valid_loader, model, criterion, epoch, transform, transform_gray)
 
             if perf_indicator > best_perf:
                 logger.info("=> saving checkpoint into {}".format(os.path.join(config.OUTPUT_DIR, 'checkpoint_{}.pth'.format(best_perf))))

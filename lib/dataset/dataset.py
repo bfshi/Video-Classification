@@ -75,7 +75,9 @@ class ActivityNet(VideoSet):
             video_info_dict[video_name] = {
                 'name': video_name,
                 'metadata': {
-                    'framenum': 0 # decided later
+                    'framenum': 0,  # decided later
+                    'duration': v['duration'],
+                    'segment': v['annotations'][0]['segment']
                 },
                 'label': v['annotations'][0]['label']
             }

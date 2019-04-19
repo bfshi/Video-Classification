@@ -34,13 +34,18 @@ def main():
     # create a logger
     logger = create_logger(config, 'train')
 
+    # logging configurations
+    logger.info(pprint.pformat(config))
+
     # cudnn related setting
     cudnn.benchmark = config.CUDNN.BENCHMARK
     torch.backends.cudnn.deterministic = config.CUDNN.DETERMINISTIC
     torch.backends.cudnn.enabled = config.CUDNN.ENABLED
 
     # create a model
-    gpus = [int(i) for i in config.GPUS.split(',')]
+    os.environ["CUDA_VISIBLE_DEVICES"] = config.GPUS
+    # gpus = [int(i) for i in config.GPUS.split(',')]
+    gpus = range(config.GPU_NUM)
     model = create_model(config, is_train=True)
 
     if config.TRAIN.RESUME:
@@ -76,6 +81,14 @@ def main():
             normalize,
         ])
 
+    normalize_gray = transforms.Normalize(mean=[0.456], std=[0.224])
+
+    transform_gray = transforms.Compose([
+        transforms.Resize((config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W)),
+        transforms.ToTensor(),
+        normalize_gray,
+    ])
+
     train_dataset = get_dataset(
         config,
         if_train = True,
@@ -110,11 +123,11 @@ def main():
         lr_scheduler.step()
 
         # train for one epoch
-        train_clf(config, train_loader, model, criterion, optimizer, epoch, transform)
+        train_clf(config, train_loader, model, criterion, optimizer, epoch, transform, transform_gray)
 
         # evaluate on validation set
         if (epoch + 1) % config.TEST.TEST_EVERY == 0:
-            perf_indicator = validate_clf(config, valid_loader, model, criterion, epoch, transform)
+            perf_indicator = validate_clf(config, valid_loader, model, criterion, epoch, transform, transform_gray)
 
             if perf_indicator > best_perf:
                 logger.info("=> saving checkpoint into {}".format(os.path.join(config.OUTPUT_DIR, 'checkpoint.pth')))

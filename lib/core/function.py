@@ -42,7 +42,7 @@ class Score_Updater():
 
 
 def train(config, train_loader, model, criterion, optimizer,
-          epoch, replay_buffer, transform = None):
+          epoch, replay_buffer, transform = None, transform_gray = None):
     """
     training method
 
@@ -95,18 +95,19 @@ def train(config, train_loader, model, criterion, optimizer,
 
             # get the input
             # input = ChooseInput(video, new_act_frame, new_act_modality, meta['framenum'])
-            input = load_frame(video_path, new_act_modality, new_act_frame,
-                               meta['framenum'], transform)
+            input = load_frame(video_path, new_act_modality.detach().cpu().view(-1, 1), new_act_frame.detach().cpu().view(-1, 1),
+                               meta['framenum'], transform, transform_gray)[:, 0]
 
             # compute output
-            next_ob, clf_score = model(input.cuda(), new_act_modality)
+            # TODO: If backbone is not freezed, we should save input instead of feature!
+            next_ob, clf_score, feature = model(input.cuda(), new_act_modality, if_return_feature = True)
             clf_score_sum += clf_score
 
             # save into replay buffer (save the copy in CPU memory)
             replay_buffer.save((ob[0].cpu(), ob[1].cpu()),
                                new_act_frame.cpu(),
                                new_act_modality.cpu(),
-                               input.cpu(),
+                               feature.cpu(),
                                (next_ob[0].cpu(), next_ob[1].cpu()),
                                compute_reward(clf_score).cpu())
 
@@ -138,14 +139,16 @@ def train(config, train_loader, model, criterion, optimizer,
         for step in range(config.TRAIN.TRAIN_RL_STEP):
 
             # sample from replay buffer a minibatch
-            ob, act_frame, act_modality, input, next_ob, reward = \
+            ob, act_frame, act_modality, feature, next_ob, reward = \
                 replay_buffer.get_batch(config.TRAIN.RL_BATCH_SIZE)
 
             # reset lstm's h and c
             model.module.init_weights(ob[0].shape[0], ob)
 
             # update reward and next_ob (shouldn't use the old ones)
-            next_ob, clf_score = model(input)
+            h, c = model.lstm(feature)
+            clf_score = model.clf_head(h)
+            next_ob = (h, c)
             reward = compute_reward(clf_score)
 
             # calculate new outputs
@@ -195,7 +198,7 @@ def train(config, train_loader, model, criterion, optimizer,
 
 # TODO: update validate
 
-def validate(config, val_loader, model, criterion, epoch, transform = None):
+def validate(config, val_loader, model, criterion, epoch, transform = None, transform_gray = None):
     """
     validating method
 
@@ -242,8 +245,8 @@ def validate(config, val_loader, model, criterion, epoch, transform = None):
 
                 # get the input
                 # input = ChooseInput(video, new_act_frame, new_act_modality, meta['framenum'])
-                input = load_frame(video_path, new_act_modality, new_act_frame,
-                                   meta['framenum'], transform)
+                input = load_frame(video_path, new_act_modality.view(-1, 1), new_act_frame.view(-1, 1),
+                                   meta['framenum'], transform, transform_gray)[:, 0]
 
                 # compute output
                 next_ob, clf_score = model(input.cuda(), new_act_modality)
@@ -281,7 +284,7 @@ def validate(config, val_loader, model, criterion, epoch, transform = None):
     return acc.avg
 
 
-def train_clf(config, train_loader, model, criterion, optimizer, epoch, transform = None):
+def train_clf(config, train_loader, model, criterion, optimizer, epoch, transform = None, transform_gray = None):
     """
     train backbone, lstm and clf_head only.
     unsorted sampling is used for each video.
@@ -323,7 +326,8 @@ def train_clf(config, train_loader, model, criterion, optimizer, epoch, transfor
         total_batch_size = target.shape[0]
 
         # unsorted sampling.
-        frame_chosen = choose_frame_randomly(total_batch_size, config.TRAIN_CLF.SAMPLE_NUM)
+        frame_chosen = choose_frame_randomly(total_batch_size, config.TRAIN_CLF.SAMPLE_NUM,
+                                             meta['segment'], meta['duration'], config.TRAIN_CLF.IF_TRIM)
         modality_chosen = choose_modality_randomly(total_batch_size, config.MODEL.MODALITY_NUM,
                                                    config.TRAIN_CLF.SAMPLE_NUM)
 
@@ -331,10 +335,13 @@ def train_clf(config, train_loader, model, criterion, optimizer, epoch, transfor
 
         target = target.cuda(async=True)
 
+        # input_whole = N * sample_num * C * H * W
+        input_whole = load_frame(video_path, modality_chosen, frame_chosen,
+                           meta['framenum'], transform, transform_gray)
+
         for j in range(config.TRAIN_CLF.SAMPLE_NUM):
             # input = N * C * H * W (contains probably different modalities)
-            input = load_frame(video_path, modality_chosen[:, j], frame_chosen[:, j],
-                               meta['framenum'], transform)
+            input = input_whole[:, j]
 
             # compute output
             _, clf_score = model(input.cuda(), modality_chosen[:, j].cuda(), config.TRAIN_CLF.IF_LSTM)
@@ -380,7 +387,7 @@ def train_clf(config, train_loader, model, criterion, optimizer, epoch, transfor
             logger.info(msg)
 
 
-def validate_clf(config, val_loader, model, criterion, epoch, transform = None):
+def validate_clf(config, val_loader, model, criterion, epoch, transform = None, transform_gray = None):
     """
     validate backbone, lstm and clf_head only.
     unsorted sampling is used for each video.
@@ -427,7 +434,7 @@ def validate_clf(config, val_loader, model, criterion, epoch, transform = None):
             for j in range(config.TRAIN_CLF.SAMPLE_NUM):
                 # single modality feature: N * frame_num * channel * H * W
                 input = load_frame(video_path, modality_chosen[:, j], frame_chosen[:, j],
-                                   meta['framenum'], transform)
+                                   meta['framenum'], transform, transform_gray)
 
                 # compute output
                 _, clf_score = model(input.cuda(), modality_chosen[:, j].cuda(), config.TRAIN_CLF.IF_LSTM)

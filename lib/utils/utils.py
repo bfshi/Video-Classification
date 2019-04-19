@@ -81,14 +81,21 @@ def ChooseInput(video, act_frame, act_modality, framenum):
     act_frame = int(np.clip(act_frame * (framenum - 1), 0, framenum - 1))
     return video[act_modality][act_frame]
 
-def choose_frame_randomly(batch_size, sample_num):
+def choose_frame_randomly(batch_size, sample_num, segment, duration, if_trim = False):
     """
     randomly choose frames
+    :param segment: [begin, end]
     """
     offset = np.random.rand(batch_size, 1) / sample_num
     # offset = np.ones((batch_size, 1), dtype=np.float32) / sample_num / 2
     frame_chosen = np.tile(np.array(range(sample_num)).astype(np.float32) / sample_num, (batch_size, 1)) + \
                    offset
+    frame_chosen = torch.DoubleTensor(frame_chosen)
+    if if_trim:
+        duration = duration.view(-1, 1).type(dtype=torch.double)
+        segment[0] = segment[0].view(-1, 1).type(dtype=torch.double)
+        segment[1] = segment[1].view(-1, 1).type(dtype=torch.double)
+        frame_chosen = frame_chosen * (segment[1] - segment[0]) / duration + segment[0] / duration
     # frame_chosen = np.random.rand(batch_size, sample_num) / sample_num
     # for i in range(1, sample_num):
     #     frame_chosen[:, i] = frame_chosen[:, i - 1] + 1.0 / sample_num
@@ -104,17 +111,18 @@ def choose_modality_randomly(batch_size, modality_num, sample_num):
                                                          size=(batch_size, sample_num)))
     return modality_chosen
 
-def load_frame(video_path, modality_chosen, frame_chosen, framenum, transform = None):
+def load_frame(video_path, modality_chosen, frame_chosen, framenum, transform = None, transform_gray = None):
     """
     compute input.
     :param video_path: ('path1', ..., 'pathN')
-    :param modality_chosen: [m1, ..., mN]
-    :param frame_chosen: [f1, ..., fN] (\in [0, 1])
-    :param [num1, ..., numN]
-    :return: N * C * H * W
+    :param modality_chosen: batch_size * sample_num
+    :param frame_chosen: batch_size * sample_num (\in [0, 1])
+    :param framenum: [num1, ..., numN]
+    :return: batch_size * sample_num * C * H * W
     """
-    frame_chosen = (frame_chosen * (framenum - 1).numpy()).astype(np.int16) + 1
-    batch_size = framenum.shape[0]
+    frame_chosen = ((frame_chosen.type(dtype=torch.double) * (framenum.type(dtype=torch.double).view(-1, 1) - 1)).numpy()).astype(np.int16) + 1
+    batch_size = frame_chosen.shape[0]
+    sample_num = frame_chosen.shape[1]
     input = []
 
     # size of flow feature
@@ -123,35 +131,44 @@ def load_frame(video_path, modality_chosen, frame_chosen, framenum, transform = 
 
     # load features of each video
     for i in range(batch_size):
-        # rgb feature
-        # totensor will transpose (H, W, C) to (C, H, W) automatically
-        if modality_chosen[i] == 0:
-            # input.append(transform(cv2.imread(os.path.join(video_path[i], 'img_%.5d.jpg' % frame_chosen[i]),
-            #                        cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)))\
-            input.append(transform(Image.open(os.path.join(video_path[i], 'img_%.5d.jpg' % frame_chosen[i]))))
-        # flow feature
-        # totensor must receive type np.uint8
-        elif modality_chosen[i] == 1:
-            # input.append(np.stack([cv2.imread(os.path.join(video_path[i], 'flow_x_%.5d.jpg' % frame_chosen[i]),
-            #                       cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION),
-            #                        cv2.imread(os.path.join(video_path[i], 'flow_y_%.5d.jpg' % frame_chosen[i]),
-            #                       cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION),
-            #                        np.zeros((config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W))],
-            #                       axis = -1).astype(np.uint8)
-            #              )
-            input.append(torch.cat((transform(Image.open(os.path.join(video_path[i],
-                                                                     'flow_x_%.5d.jpg' % frame_chosen[i])).convert('L')),
-                                   transform(Image.open(os.path.join(video_path[i],
-                                                                     'flow_y_%.5d.jpg' % frame_chosen[i])).convert('L')),
-                                   torch.zeros((1, config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W))))
-                         )
-            # TODO: some flow.jpg have 3 channel???
-            #  "RuntimeError: invalid argument 0: Sizes of tensors must match except in dimension 0.
-            #  Got 3 and 7 in dimension 1" in "torch.stack(input)"
+        input_i = []
+        for j in range(sample_num):
+            # rgb feature
+            # totensor will transpose (H, W, C) to (C, H, W) automatically
+            if modality_chosen[i, j] == 0:
+                # input.append(transform(cv2.imread(os.path.join(video_path[i], 'img_%.5d.jpg' % frame_chosen[i]),
+                #                        cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)))\
+                input_i.append(transform(Image.open(os.path.join(video_path[i], 'img_%.5d.jpg' % frame_chosen[i, j]))))
+            # flow feature
+            # totensor must receive type np.uint8
+            elif modality_chosen[i, j] == 1:
+                # input.append(np.stack([cv2.imread(os.path.join(video_path[i], 'flow_x_%.5d.jpg' % frame_chosen[i]),
+                #                       cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION),
+                #                        cv2.imread(os.path.join(video_path[i], 'flow_y_%.5d.jpg' % frame_chosen[i]),
+                #                       cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION),
+                #                        np.zeros((config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W))],
+                #                       axis = -1).astype(np.uint8)
+                #              )
+                input_i.append(torch.cat((transform_gray(Image.open(os.path.join(video_path[i],
+                                                                         'flow_x_%.5d.jpg' % frame_chosen[i, j])).convert('L')),
+                                       transform_gray(Image.open(os.path.join(video_path[i],
+                                                                         'flow_y_%.5d.jpg' % frame_chosen[i, j])).convert('L')),
+                                       torch.zeros((1, config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W))))
+                             )
+                # TODO: some flow.jpg have 3 channel???
+                #  "RuntimeError: invalid argument 0: Sizes of tensors must match except in dimension 0.
+                #  Got 3 and 7 in dimension 1" in "torch.stack(input)"
+        input.append(torch.stack(input_i))
 
     return torch.stack(input)
 
-
+def torch_clip(tensor, lower, upper, if_cuda=False):
+    lower = torch.Tensor(lower).new_full((tensor.shape[0],), lower)
+    upper = torch.Tensor(upper).new_full((tensor.shape[0],), upper)
+    if if_cuda:
+        lower = lower.cuda()
+        upper = upper.cuda()
+    return torch.max(torch.min(tensor, other=upper), other=lower)
 
 
 def rollout(vedio, model, action, value):

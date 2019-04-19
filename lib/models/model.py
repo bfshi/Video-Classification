@@ -11,6 +11,7 @@ import _init_paths
 from models.backbone import getBackbone
 from models.lstm import getLSTM
 from utils.utils import soft_update_from_to
+from utils.utils import torch_clip
 
 class Backbones(nn.Module):
     def __init__(self, config, is_train = True):
@@ -65,7 +66,7 @@ class VedioClfNet(nn.Module):
         # output modality selection probability
         self.act_head_modality = nn.Sequential(
             nn.Linear(config.MODEL.LSTM_OUTDIM, config.MODEL.MODALITY_NUM),
-            nn.Softmax(config.MODEL.MODALITY_NUM)
+            nn.Softmax(dim=1)
         )
 
         # output classification scores (not softmaxed)
@@ -81,7 +82,7 @@ class VedioClfNet(nn.Module):
         # output soft state-action value
         self.q_head = nn.Linear(config.MODEL.LSTM_OUTDIM + 1 + 1, 1)
 
-    def forward(self, x, modality, if_lstm = True):
+    def forward(self, x, modality, if_lstm = True, if_return_feature = False):
         """
         :param x: N * C * H * W
         :param modality: N dimension array. 0-rgb_raw, 1-flow
@@ -98,7 +99,10 @@ class VedioClfNet(nn.Module):
         # modality_prob = self.act_head_modality(h)
         # v_value = self.v_head(h)
 
-        return (h, c), clf_score
+        if if_return_feature:
+            return (h, c), clf_score, y
+        else:
+            return (h, c), clf_score
 
     def policy(self, h):
         """
@@ -106,9 +110,11 @@ class VedioClfNet(nn.Module):
         :param h: old observation
         :return: new action and log of prob
         """
-        mean, std = self.act_head_frame(h)
+        act_frame = self.act_head_frame(h)
+        mean = act_frame[:, 0]
+        std = act_frame[:, 1]
         modality_prob = self.act_head_modality(h)
-        new_act_frame = torch.normal(mean, std)
+        new_act_frame = torch_clip(torch.normal(mean, std), 0, 1, if_cuda=True)
         new_act_modality = torch.multinomial(modality_prob, num_samples=1, replacement=True)
         log_pi = -torch.log((2 * np.pi) ** 0.5 * std) - \
                  (new_act_frame - mean).pow(2) / (2 * std.pow(2)) + \

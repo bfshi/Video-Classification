@@ -3,7 +3,6 @@ from __future__ import division
 from __future__ import print_function
 
 import os
-import yaml
 import csv
 
 import numpy as np
@@ -14,10 +13,11 @@ config = edict()
 
 # common configs
 
-config.GPUS = '0, 1'
+config.GPUS = '3, 4, 5'
+config.GPU_NUM = 3
 config.WORKERS = 0
 # config.DATASET = 'ActivityNet'
-config.MODE = 'train_clf'  # train / train_clf
+config.MODE = 'train'  # train / train_clf
 
 # Cudnn related params
 config.CUDNN = edict()
@@ -32,7 +32,7 @@ config.ActivityNet.FLOW_H = 256
 config.ActivityNet.FLOW_W = 340
 config.ActivityNet.INCOMPLETE_VIDEO = 'incomplete_video.csv'
 config.ActivityNet.BLANK_VIDEO = 'blank_video.csv'
-config.ActivityNet.BLOCKED_VIDEO = []  # incomplete frames(loaded in L112)
+config.ActivityNet.BLOCKED_VIDEO = []  # incomplete frames(loaded in L132)
 
 # models related configs
 
@@ -59,7 +59,7 @@ config.MODEL.PRETRAINED_PATH = 'pretrained_models/resnet50-19c8e357.pth'
 config.TRAIN = edict()
 
 config.TRAIN.RESUME = True  # whether to continue previous training
-config.TRAIN.STATE_DICT = 'checkpoint.pth'
+config.TRAIN.STATE_DICT = 'train_clf/model_2019-04-12-17-34_0.329.pth'
 
 config.TRAIN.SINGLE_GPU = False
 config.TRAIN.GPU = '1'  # which to use when SINGLE_GPU == True
@@ -86,10 +86,10 @@ config.TRAIN.TRAIN_CLF_STEP = 10  # num of steps to train classification head on
 config.TRAIN.TRAIN_RL_STEP = 10  # num of steps to train policy after every clf_train
 config.TRAIN.ROLLOUT_STEP = 1  # num of rollout steps after an action
 
-config.TRAIN.BEGIN_EPOCH = 4
+config.TRAIN.BEGIN_EPOCH = 0
 config.TRAIN.END_EPOCH = 120
 
-config.TRAIN.BATCH_SIZE = 16  # paralleled batch size per gpu
+config.TRAIN.BATCH_SIZE = 8  # paralleled batch size per gpu
 config.TRAIN.RL_BATCH_SIZE = 32
 config.TRAIN.SHUFFLE = True
 
@@ -102,6 +102,7 @@ config.TRAIN.PRINT_EVERY = 1
 config.TRAIN_CLF = edict()
 
 config.TRAIN_CLF.SAMPLE_NUM = 5
+config.TRAIN_CLF.IF_TRIM = True
 
 config.TRAIN_CLF.IF_LSTM = False
 
@@ -125,7 +126,8 @@ config.TEST.PRINT_EVERY = 1
 config.OUTPUT_DIR = os.path.join('experiments/', config.TRAIN.DATASET,
                                  'resnet{}'.format(config.MODEL.RESNET_TYPE), config.MODE)
 
-config.TRAIN.STATE_DICT = os.path.join(config.OUTPUT_DIR, config.TRAIN.STATE_DICT)
+config.TRAIN.STATE_DICT = os.path.join('experiments/', config.TRAIN.DATASET,
+                                 'resnet{}'.format(config.MODEL.RESNET_TYPE), config.TRAIN.STATE_DICT)
 
 
 dataset = config.TRAIN.DATASET
