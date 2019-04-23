@@ -6,6 +6,7 @@ import argparse
 import os
 import pprint
 import shutil
+import json
 
 import torch
 import torch.nn.parallel
@@ -30,11 +31,11 @@ from utils.replay_buffer import create_replay_buffer
 
 def main():
     # convert to train_clf mode
-    config.MODE = 'train_clf'
+    config.MODE = 'val_clf'
     extra()
 
     # create a logger
-    logger = create_logger(config, 'train')
+    logger = create_logger(config, 'val')
 
     # logging configurations
     logger.info(pprint.pformat(config))
@@ -91,25 +92,12 @@ def main():
         normalize_gray,
     ])
 
-    train_dataset = get_dataset(
-        config,
-        if_train = True,
-        transform = transform
-    )
     valid_dataset = get_dataset(
         config,
         if_train = False,
         transform = transform
     )
 
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=config.TRAIN.BATCH_SIZE * len(gpus),
-        shuffle=config.TRAIN.SHUFFLE,
-        num_workers=config.WORKERS,
-        pin_memory=True,
-        drop_last=True
-    )
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset,
         batch_size=config.TRAIN.BATCH_SIZE * len(gpus),
@@ -118,29 +106,28 @@ def main():
         pin_memory=True,
     )
 
+    # output result or not
+    output_dict = dict()
+    # complement some info
+    output_dict['version'] = 'VERSION 1.3'
+    output_dict['results'] = {}
+    output_dict['external_data'] = {"used": False, "details": "No details."}
+
     # training and validating
-    best_perf = 0
-    perf_indicator = 0
-    for epoch in range(config.TRAIN.BEGIN_EPOCH, config.TRAIN.END_EPOCH):
-        lr_scheduler.step()
-
-        # train for one epoch
-        train_clf(config, train_loader, model, criterion, optimizer, epoch, transform, transform_gray)
-
-        # evaluate on validation set
-        if (epoch + 1) % config.TEST.TEST_EVERY == 0:
-            perf_indicator = validate_clf(config, valid_loader, model, criterion, epoch, transform, transform_gray)
-
-            if perf_indicator > best_perf:
-                logger.info("=> saving checkpoint into {}".format(os.path.join(config.OUTPUT_DIR, 'checkpoint.pth')))
-                best_perf = perf_indicator
-                torch.save(model.state_dict(), os.path.join(config.OUTPUT_DIR, 'checkpoint.pth'))
+    perf_indicator = validate_clf(config, valid_loader, model, criterion, 0, transform, transform_gray,
+                                  output_dict, valid_dataset)
 
     logger.info("=> saving final model into {}".format(
         os.path.join(config.OUTPUT_DIR, 'model_clf_{acc_avg}.pth'.format(acc_avg=perf_indicator))
     ))
     torch.save(model.state_dict(),
                os.path.join(config.OUTPUT_DIR, 'model_clf_{acc_avg}.pth'.format(acc_avg=perf_indicator)))
+
+    # output the result
+    output_file = open(os.path.join(config.OUTPUT_DIR, 'result_clf_{acc_avg}.pth'.format(acc_avg=perf_indicator)),
+                       'w')
+    json.dump(output_dict, output_file)
+    output_file.close()
 
 
 if __name__ == '__main__':

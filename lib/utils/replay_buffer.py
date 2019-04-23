@@ -22,15 +22,16 @@ class ReplayBuffer():
         self._observations_h = torch.zeros((self._max_replay_buffer_size, self._observation_dim))
         self._observations_c = torch.zeros((self._max_replay_buffer_size, self._observation_dim))
         self._feature = torch.zeros((self._max_replay_buffer_size, self._feature_dim))
+        self._target = torch.zeros((self._max_replay_buffer_size), dtype=torch.long)
         self._next_obs_h = torch.zeros((self._max_replay_buffer_size, self._observation_dim))
         self._next_obs_c = torch.zeros((self._max_replay_buffer_size, self._observation_dim))
-        self._actions_frame = torch.zeros((self._max_replay_buffer_size, 1))
-        self._actions_modality = torch.zeros((self._max_replay_buffer_size, 1))
-        self._rewards = torch.zeros((self._max_replay_buffer_size, 1))
+        self._actions_frame = torch.zeros((self._max_replay_buffer_size))
+        self._actions_modality = torch.zeros((self._max_replay_buffer_size))
+        self._rewards = torch.zeros((self._max_replay_buffer_size))
         self._top = 0
         self._size = 0
 
-    def save(self, ob, act_frame, act_modality, feature, next_ob, reward):
+    def save(self, ob, act_frame, act_modality, feature, target, next_ob, reward):
         """
         Save current observations, actions, rewards and next observations.
         """
@@ -44,6 +45,7 @@ class ReplayBuffer():
             self._actions_frame[self._top : self._top + size_needed] = act_frame
             self._actions_modality[self._top : self._top + size_needed] = act_modality
             self._feature[self._top : self._top + size_needed] = feature
+            self._target[self._top: self._top + size_needed] = target
             self._rewards[self._top : self._top + size_needed] = reward
             self._next_obs_h[self._top : self._top + size_needed] = next_ob[0]
             self._next_obs_c[self._top : self._top + size_needed] = next_ob[1]
@@ -53,6 +55,7 @@ class ReplayBuffer():
             self._actions_frame[self._top: ] = act_frame[0 : size_left]
             self._actions_modality[self._top: ] = act_modality[0 : size_left]
             self._feature[self._top: ] = feature[0 : size_left]
+            self._target[self._top:] = target[0: size_left]
             self._rewards[self._top: ] = reward[0 : size_left]
             self._next_obs_h[self._top: ] = next_ob[0][0 : size_left]
             self._next_obs_c[self._top: ] = next_ob[1][0 : size_left]
@@ -62,6 +65,7 @@ class ReplayBuffer():
             self._actions_frame[0 : size_extra] = act_frame[-size_extra:]
             self._actions_modality[0 : size_extra] = act_modality[-size_extra:]
             self._feature[0 : size_extra] = feature[-size_extra:]
+            self._target[0 : size_extra] = target[-size_extra:]
             self._rewards[0 : size_extra] = reward[-size_extra:]
             self._next_obs_h[0 : size_extra] = next_ob[0][-size_extra:]
             self._next_obs_c[0 : size_extra] = next_ob[1][-size_extra:]
@@ -78,6 +82,7 @@ class ReplayBuffer():
             self._actions_frame[indices].cuda(),
             self._actions_modality[indices].cuda(),
             self._feature[indices].cuda(),
+            self._target[indices].cuda(),
             (self._next_obs_h[indices].cuda(), self._next_obs_c[indices].cuda()),
             self._rewards[indices].cuda(),
         ]

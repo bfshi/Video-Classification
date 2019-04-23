@@ -104,12 +104,13 @@ def train(config, train_loader, model, criterion, optimizer,
             clf_score_sum += clf_score
 
             # save into replay buffer (save the copy in CPU memory)
-            replay_buffer.save((ob[0].cpu(), ob[1].cpu()),
-                               new_act_frame.cpu(),
-                               new_act_modality.cpu(),
-                               feature.cpu(),
-                               (next_ob[0].cpu(), next_ob[1].cpu()),
-                               compute_reward(clf_score).cpu())
+            replay_buffer.save((ob[0].detach().cpu(), ob[1].detach().cpu()),
+                               new_act_frame.detach().cpu(),
+                               new_act_modality.detach().cpu(),
+                               feature.detach().cpu(),
+                               target.detach().cpu(),
+                               (next_ob[0].detach().cpu(), next_ob[1].detach().cpu()),
+                               compute_reward(clf_score, target).detach().cpu())
 
             # compute loss
             loss = criterion.clf_loss(clf_score, target)
@@ -139,28 +140,28 @@ def train(config, train_loader, model, criterion, optimizer,
         for step in range(config.TRAIN.TRAIN_RL_STEP):
 
             # sample from replay buffer a minibatch
-            ob, act_frame, act_modality, feature, next_ob, reward = \
+            ob, act_frame, act_modality, feature, target, next_ob, reward = \
                 replay_buffer.get_batch(config.TRAIN.RL_BATCH_SIZE)
 
             # reset lstm's h and c
-            model.module.init_weights(ob[0].shape[0], ob)
+            model.init_weights(ob[0].shape[0], ob)
 
             # update reward and next_ob (shouldn't use the old ones)
             h, c = model.lstm(feature)
             clf_score = model.clf_head(h)
             next_ob = (h, c)
-            reward = compute_reward(clf_score)
+            reward = compute_reward(clf_score, target)
 
             # calculate new outputs
-            q_pred = model.q_head(torch.cat((ob[0], act_frame, act_modality), 1))
+            q_pred = model.q_head(torch.cat((ob[0], act_frame.view(-1, 1), act_modality.view(-1, 1)), 1))
             v_pred = model.v_head(ob[0])
 
             new_act_frame, new_act_modality, log_pi = model.policy(ob[0])
-            q_new_actions = model.q_head(torch.cat((ob[0], new_act_frame, new_act_modality), 1))
+            q_new_actions = model.q_head(torch.cat((ob[0], new_act_frame.view(-1, 1), new_act_modality.type(dtype=torch.float).view(-1, 1)), 1))
             target_v_pred_next = model.target_v_head(ob[0])
 
             # compute the loss
-            loss = rl_losses(reward, q_pred, v_pred, target_v_pred_next, log_pi, q_new_actions)
+            loss = criterion.rl_loss(reward, q_pred, v_pred, target_v_pred_next, log_pi, q_new_actions)
 
             # back prop
             optimizer.zero_grad()
@@ -239,13 +240,13 @@ def validate(config, val_loader, model, criterion, epoch, transform = None, tran
             losses_batch.reset()
 
             #TODO: how to decide when to stop?
-            for step in range(config.TRAIN.TEST_STEP):
+            for step in range(config.TEST.TEST_STEP):
                 # decide action according to model's policy and current observation
                 new_act_frame, new_act_modality, _ = model.policy(ob[0])
 
                 # get the input
                 # input = ChooseInput(video, new_act_frame, new_act_modality, meta['framenum'])
-                input = load_frame(video_path, new_act_modality.view(-1, 1), new_act_frame.view(-1, 1),
+                input = load_frame(video_path, new_act_modality.cpu().view(-1, 1), new_act_frame.cpu().view(-1, 1),
                                    meta['framenum'], transform, transform_gray)[:, 0]
 
                 # compute output
@@ -387,7 +388,8 @@ def train_clf(config, train_loader, model, criterion, optimizer, epoch, transfor
             logger.info(msg)
 
 
-def validate_clf(config, val_loader, model, criterion, epoch, transform = None, transform_gray = None):
+def validate_clf(config, val_loader, model, criterion, epoch = 0, transform = None, transform_gray = None,
+                 output_dict = None, valid_dataset = None):
     """
     validate backbone, lstm and clf_head only.
     unsorted sampling is used for each video.
@@ -399,6 +401,10 @@ def validate_clf(config, val_loader, model, criterion, epoch, transform = None, 
     :param epoch: current epoch
     :return: None
     """
+    # whether to output the result
+    if_output_result = (valid_dataset != None)
+    label_head = ['label' for i in range(config.MODEL.CLFDIM)]
+    score_head = ['score' for i in range(config.MODEL.CLFDIM)]
 
     # build recorders
     batch_time = AverageMeter()
@@ -422,19 +428,22 @@ def validate_clf(config, val_loader, model, criterion, epoch, transform = None, 
             total_batch_size = target.shape[0]
 
             # unsorted sampling.
-            frame_chosen = np.random.rand(total_batch_size, config.TRAIN_CLF.SAMPLE_NUM)
-            modality_chosen = torch.LongTensor(np.random.randint(0, config.MODEL.MODALITY_NUM,
-                                                                 size=(total_batch_size, config.TRAIN_CLF.SAMPLE_NUM)))
+            frame_chosen = choose_frame_randomly(total_batch_size, config.TRAIN_CLF.SAMPLE_NUM,
+                                                 meta['segment'], meta['duration'], config.TEST.IF_TRIM)
+            modality_chosen = choose_modality_randomly(total_batch_size, config.MODEL.MODALITY_NUM,
+                                                       config.TRAIN_CLF.SAMPLE_NUM)
 
             clf_score_sum = torch.zeros((total_batch_size, config.MODEL.CLFDIM)).cuda()
 
             target = target.cuda()
 
+            input_whole = load_frame(video_path, modality_chosen, frame_chosen,
+                                     meta['framenum'], transform, transform_gray)
+
             # TODO: load frames when training. (refer to train_clf)
             for j in range(config.TRAIN_CLF.SAMPLE_NUM):
                 # single modality feature: N * frame_num * channel * H * W
-                input = load_frame(video_path, modality_chosen[:, j], frame_chosen[:, j],
-                                   meta['framenum'], transform, transform_gray)
+                input = input_whole[:, j]
 
                 # compute output
                 _, clf_score = model(input.cuda(), modality_chosen[:, j].cuda(), config.TRAIN_CLF.IF_LSTM)
@@ -464,5 +473,11 @@ def validate_clf(config, val_loader, model, criterion, epoch, transform = None, 
                     i, len(val_loader), batch_time=batch_time,
                     loss=clf_losses, acc=acc)
                 logger.info(msg)
+
+            if if_output_result:
+                for j in range(total_batch_size):
+                    temp = list(zip(list(zip(score_head, clf_score_sum[j])),
+                                    list(zip(label_head, valid_dataset.label_list))))
+                    output_dict['results'][meta['label'][j]] = list(map(dict, temp))
 
     return acc.avg

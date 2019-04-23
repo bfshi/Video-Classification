@@ -13,11 +13,11 @@ config = edict()
 
 # common configs
 
-config.GPUS = '3, 4, 5'
+config.GPUS = '0, 1, 3'
 config.GPU_NUM = 3
 config.WORKERS = 0
 # config.DATASET = 'ActivityNet'
-config.MODE = 'train'  # train / train_clf
+config.MODE = 'train_clf'  # train / train_clf
 
 # Cudnn related params
 config.CUDNN = edict()
@@ -59,7 +59,8 @@ config.MODEL.PRETRAINED_PATH = 'pretrained_models/resnet50-19c8e357.pth'
 config.TRAIN = edict()
 
 config.TRAIN.RESUME = True  # whether to continue previous training
-config.TRAIN.STATE_DICT = 'train_clf/model_2019-04-12-17-34_0.329.pth'
+config.TRAIN.STATE_DICT = 'train_clf/model_2019-04-21-23-59_0.606.pth'
+# config.TRAIN.STATE_DICT = 'train_clf/checkpoint.pth'
 
 config.TRAIN.SINGLE_GPU = False
 config.TRAIN.GPU = '1'  # which to use when SINGLE_GPU == True
@@ -74,7 +75,7 @@ config.TRAIN.LR_DECAY_RATE = 0.5
 config.TRAIN.LR_MILESTONES = [30, 60, 90]  # at which epoch lr decays
 config.TRAIN.SOFT_UPDATE = 0.005  # 0.005 in SAC paper / 0.01 in rlkit
 
-config.TRAIN.OPTIMIZER = 'adam'
+config.TRAIN.OPTIMIZER = 'sgd'
 config.TRAIN.MOMENTUM = 0.9
 config.TRAIN.WD = 0.0001
 config.TRAIN.NESTEROV = False
@@ -82,14 +83,14 @@ config.TRAIN.R_PLC = 1
 config.TRAIN.R_Q = 1
 config.TRAIN.R_V = 1
 
-config.TRAIN.TRAIN_CLF_STEP = 10  # num of steps to train classification head on a single vedio
+config.TRAIN.TRAIN_CLF_STEP = 5  # num of steps to train classification head on a single vedio
 config.TRAIN.TRAIN_RL_STEP = 10  # num of steps to train policy after every clf_train
 config.TRAIN.ROLLOUT_STEP = 1  # num of rollout steps after an action
 
 config.TRAIN.BEGIN_EPOCH = 0
 config.TRAIN.END_EPOCH = 120
 
-config.TRAIN.BATCH_SIZE = 8  # paralleled batch size per gpu
+config.TRAIN.BATCH_SIZE = 16  # paralleled batch size per gpu
 config.TRAIN.RL_BATCH_SIZE = 32
 config.TRAIN.SHUFFLE = True
 
@@ -113,9 +114,11 @@ config.TRAIN_CLF.GPU = '1'  # which to use when SINGLE_GPU == True
 
 config.TEST = edict()
 
+config.TEST.IF_TRIM = True
+
 config.TEST.TEST_EVERY = 5
 
-config.TEST.TEST_STEP = 10
+config.TEST.TEST_STEP = 5
 
 config.TEST.BATCH_SIZE = 32
 
@@ -123,20 +126,21 @@ config.TEST.PRINT_EVERY = 1
 
 # extra
 
-config.OUTPUT_DIR = os.path.join('experiments/', config.TRAIN.DATASET,
-                                 'resnet{}'.format(config.MODEL.RESNET_TYPE), config.MODE)
+def extra():
+    config.OUTPUT_DIR = os.path.join('experiments/', config.TRAIN.DATASET,
+                                     'resnet{}'.format(config.MODEL.RESNET_TYPE), config.MODE)
 
-config.TRAIN.STATE_DICT = os.path.join('experiments/', config.TRAIN.DATASET,
-                                 'resnet{}'.format(config.MODEL.RESNET_TYPE), config.TRAIN.STATE_DICT)
+    config.TRAIN.STATE_DICT = os.path.join('experiments/', config.TRAIN.DATASET,
+                                     'resnet{}'.format(config.MODEL.RESNET_TYPE), config.TRAIN.STATE_DICT)
 
 
-dataset = config.TRAIN.DATASET
-with open(os.path.join(config.TRAIN.DATAROOT, config.TRAIN.DATASET,
-          config[dataset].INCOMPLETE_VIDEO), 'r') as correction_file:
-    reader = csv.reader(correction_file)
-    config[dataset].BLOCKED_VIDEO.extend(list(reader)[0])
+    dataset = config.TRAIN.DATASET
+    with open(os.path.join(config.TRAIN.DATAROOT, config.TRAIN.DATASET,
+              config[dataset].INCOMPLETE_VIDEO), 'r') as correction_file:
+        reader = csv.reader(correction_file)
+        config[dataset].BLOCKED_VIDEO.extend(list(reader)[0])
 
-with open(os.path.join(config.TRAIN.DATAROOT, config.TRAIN.DATASET,
-          config[dataset].BLANK_VIDEO), 'r') as correction_file:
-    reader = csv.reader(correction_file)
-    config[dataset].BLOCKED_VIDEO.extend(list(reader)[0])
+    with open(os.path.join(config.TRAIN.DATAROOT, config.TRAIN.DATASET,
+              config[dataset].BLANK_VIDEO), 'r') as correction_file:
+        reader = csv.reader(correction_file)
+        config[dataset].BLOCKED_VIDEO.extend(list(reader)[0])

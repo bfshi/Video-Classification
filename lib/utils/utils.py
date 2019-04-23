@@ -81,7 +81,7 @@ def ChooseInput(video, act_frame, act_modality, framenum):
     act_frame = int(np.clip(act_frame * (framenum - 1), 0, framenum - 1))
     return video[act_modality][act_frame]
 
-def choose_frame_randomly(batch_size, sample_num, segment, duration, if_trim = False):
+def choose_frame_randomly(batch_size, sample_num, segment=None, duration=None, if_trim = False):
     """
     randomly choose frames
     :param segment: [begin, end]
@@ -185,19 +185,19 @@ def rollout(vedio, model, action, value):
     with torch.no_grad():
         return None
 
-def compute_reward(clf_score):
+def compute_reward(clf_score, target):
     """
     compute reward according to classification score
     :param clf_score: NOT softmaxed!!!
     :return: reward
     """
-    # TODO: log(max / second_max) or log(gt / max_else) ???
-    clf_score = torch.nn.functional.softmax(clf_score, dim = 1)
-    maxv, maxpos = clf_score.max(dim = 1)
-    minv, _ = clf_score.min(dim = 1)
-    clf_score[range(clf_score.shape[0]), maxpos] = minv
-    second_maxv, _ = clf_score.max()
-    return torch.log(maxv / second_maxv)
+    # reward = gt - max_else
+    targetv = clf_score[range(clf_score.shape[0]), target]
+    minv, _ = clf_score.min(dim=1)
+    tmp = clf_score.clone()
+    tmp[range(clf_score.shape[0]), target] = minv
+    else_maxv, _ = tmp.max(dim=1)
+    return targetv - else_maxv
 
 
 def soft_update_from_to(source, target, tau):

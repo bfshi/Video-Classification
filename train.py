@@ -17,6 +17,7 @@ import torchvision.transforms as transforms
 
 import _init_paths
 from core.config import config
+from core.config import extra
 from core.function import train
 from core.function import validate
 from core.loss import Loss
@@ -30,6 +31,7 @@ from utils.replay_buffer import create_replay_buffer
 def main():
     # convert to train mode
     config.MODE = 'train'
+    extra()
 
     # create a logger
     logger = create_logger(config, 'train')

@@ -29,6 +29,8 @@ class VideoSet(Dataset):
         self.video_info = []
         # label_dic = {'label1': 0, 'label2': 1, ...}
         self.label_dic = {}
+        # label_list = ['label1', 'label2', ...]
+        self.label_list = []
 
     def load_dataset(self):
         # implemented in child class
@@ -59,6 +61,7 @@ class ActivityNet(VideoSet):
             reader = csv.DictReader(labelfile)
             for line in reader:
                 self.label_dic[line['label']] = int(line['label_idx'])
+                self.label_list.append(line['label'])
 
         # load video info from .json
         with open(self.config.TRAIN.DATAROOT + self.config.TRAIN.DATASET +

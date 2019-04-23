@@ -115,7 +115,7 @@ class VedioClfNet(nn.Module):
         std = act_frame[:, 1]
         modality_prob = self.act_head_modality(h)
         new_act_frame = torch_clip(torch.normal(mean, std), 0, 1, if_cuda=True)
-        new_act_modality = torch.multinomial(modality_prob, num_samples=1, replacement=True)
+        new_act_modality = torch.multinomial(modality_prob, num_samples=1, replacement=True).view(-1)
         log_pi = -torch.log((2 * np.pi) ** 0.5 * std) - \
                  (new_act_frame - mean).pow(2) / (2 * std.pow(2)) + \
                  torch.log(modality_prob[range(modality_prob.shape[0]), new_act_modality])

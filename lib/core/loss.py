@@ -35,7 +35,7 @@ class Loss(nn.Module):
     def rl_loss(self, rewards, q_pred, v_pred, target_v_pred_next, log_pi, q_new_actions):
 
         # q-value loss
-        q_target = rewards + config.DISCOUNT * target_v_pred_next
+        q_target = rewards + config.MODEL.DISCOUNT * target_v_pred_next
         q_loss = self.q_criterion(q_pred, q_target.detach())
 
         # v-value loss
