@@ -17,7 +17,7 @@ class Set(Dataset):
         return 2
 
     def __getitem__(self, item):
-        return [np.array([1, 2]), np.array([3, 4])], 'asd', {'a': 1}
+        return [np.array([1, 2]), np.array([3, 4])], 'asd', {'a': '!!!'}
 
 train_loader = DataLoader(
         Set(),

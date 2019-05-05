@@ -43,9 +43,14 @@ class Loss(nn.Module):
         v_loss = self.v_criterion(v_pred, v_target.detach())
 
         # policy loss
+        # FIXME:
         log_policy_target = q_new_actions - v_pred
+        # log_policy_target = q_new_actions
         policy_loss = (
                 log_pi * (log_pi - log_policy_target).detach()
         ).mean()
 
+        print("policy loss: {}".format(policy_loss.detach().cpu().numpy()))
+        print("q_loss: {}".format(q_loss.detach().cpu().numpy()))
+        print("v_loss: {}".format(v_loss.detach().cpu().numpy()))
         return self.r_plc * policy_loss + self.r_q * q_loss + self.r_v * v_loss

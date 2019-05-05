@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 import cv2
 from PIL import Image
+import json
 
 import numpy as np
 
@@ -125,42 +126,50 @@ def load_frame(video_path, modality_chosen, frame_chosen, framenum, transform = 
     sample_num = frame_chosen.shape[1]
     input = []
 
-    # size of flow feature
-    flow_h = config[config.TRAIN.DATASET].FLOW_H
-    flow_w = config[config.TRAIN.DATASET].FLOW_W
+    # modality_chosen is a tensor, while frame_chosen is a np.array! They differ in transpose().
+    if torch.is_tensor(video_path):
 
-    # load features of each video
-    for i in range(batch_size):
-        input_i = []
-        for j in range(sample_num):
-            # rgb feature
-            # totensor will transpose (H, W, C) to (C, H, W) automatically
-            if modality_chosen[i, j] == 0:
-                # input.append(transform(cv2.imread(os.path.join(video_path[i], 'img_%.5d.jpg' % frame_chosen[i]),
-                #                        cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)))\
-                input_i.append(transform(Image.open(os.path.join(video_path[i], 'img_%.5d.jpg' % frame_chosen[i, j]))))
-            # flow feature
-            # totensor must receive type np.uint8
-            elif modality_chosen[i, j] == 1:
-                # input.append(np.stack([cv2.imread(os.path.join(video_path[i], 'flow_x_%.5d.jpg' % frame_chosen[i]),
-                #                       cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION),
-                #                        cv2.imread(os.path.join(video_path[i], 'flow_y_%.5d.jpg' % frame_chosen[i]),
-                #                       cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION),
-                #                        np.zeros((config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W))],
-                #                       axis = -1).astype(np.uint8)
-                #              )
-                input_i.append(torch.cat((transform_gray(Image.open(os.path.join(video_path[i],
-                                                                         'flow_x_%.5d.jpg' % frame_chosen[i, j])).convert('L')),
-                                       transform_gray(Image.open(os.path.join(video_path[i],
-                                                                         'flow_y_%.5d.jpg' % frame_chosen[i, j])).convert('L')),
-                                       torch.zeros((1, config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W))))
-                             )
-                # TODO: some flow.jpg have 3 channel???
-                #  "RuntimeError: invalid argument 0: Sizes of tensors must match except in dimension 0.
-                #  Got 3 and 7 in dimension 1" in "torch.stack(input)"
-        input.append(torch.stack(input_i))
+        return video_path[range(batch_size), modality_chosen.transpose(0, 1), frame_chosen.transpose(1, 0)].transpose(0, 1)
 
-    return torch.stack(input)
+
+    else:
+
+        # size of flow feature
+        flow_h = config[config.TRAIN.DATASET].FLOW_H
+        flow_w = config[config.TRAIN.DATASET].FLOW_W
+
+        # load features of each video
+        for i in range(batch_size):
+            input_i = []
+            for j in range(sample_num):
+                # rgb feature
+                # totensor will transpose (H, W, C) to (C, H, W) automatically
+                if modality_chosen[i, j] == 0:
+                    # input.append(transform(cv2.imread(os.path.join(video_path[i], 'img_%.5d.jpg' % frame_chosen[i]),
+                    #                        cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)))\
+                    input_i.append(transform(Image.open(os.path.join(video_path[i], 'img_%.5d.jpg' % frame_chosen[i, j]))))
+                # flow feature
+                # totensor must receive type np.uint8
+                elif modality_chosen[i, j] == 1:
+                    # input.append(np.stack([cv2.imread(os.path.join(video_path[i], 'flow_x_%.5d.jpg' % frame_chosen[i]),
+                    #                       cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION),
+                    #                        cv2.imread(os.path.join(video_path[i], 'flow_y_%.5d.jpg' % frame_chosen[i]),
+                    #                       cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION),
+                    #                        np.zeros((config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W))],
+                    #                       axis = -1).astype(np.uint8)
+                    #              )
+                    input_i.append(torch.cat((transform_gray(Image.open(os.path.join(video_path[i],
+                                                                             'flow_x_%.5d.jpg' % frame_chosen[i, j])).convert('L')),
+                                           transform_gray(Image.open(os.path.join(video_path[i],
+                                                                             'flow_y_%.5d.jpg' % frame_chosen[i, j])).convert('L')),
+                                           torch.zeros((1, config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W))))
+                                 )
+                    # TODO: some flow.jpg have 3 channel???
+                    #  "RuntimeError: invalid argument 0: Sizes of tensors must match except in dimension 0.
+                    #  Got 3 and 7 in dimension 1" in "torch.stack(input)"
+            input.append(torch.stack(input_i))
+
+        return torch.stack(input)
 
 def torch_clip(tensor, lower, upper, if_cuda=False):
     lower = torch.Tensor(lower).new_full((tensor.shape[0],), lower)
@@ -185,19 +194,27 @@ def rollout(vedio, model, action, value):
     with torch.no_grad():
         return None
 
-def compute_reward(clf_score, target):
+def compute_reward(clf_score_new, clf_score, target, cost = None):
     """
     compute reward according to classification score
     :param clf_score: NOT softmaxed!!!
+    :param cost: aggregated cost (must below limit, otherwise reward is 0)
     :return: reward
     """
-    # reward = gt - max_else
-    targetv = clf_score[range(clf_score.shape[0]), target]
-    minv, _ = clf_score.min(dim=1)
-    tmp = clf_score.clone()
-    tmp[range(clf_score.shape[0]), target] = minv
-    else_maxv, _ = tmp.max(dim=1)
-    return targetv - else_maxv
+    batch_size = clf_score.shape[0]
+
+    top2, indices = torch.topk(clf_score, k=2, dim=1)
+    gap = (clf_score[range(batch_size), target] - top2[:, 0]) * (indices[:, 0] != target).type(torch.float) + \
+          (clf_score[range(batch_size), target] - top2[:, 1]) * (indices[:, 0] == target).type(torch.float)
+
+    top2, indices = torch.topk(clf_score_new, k=2, dim=1)
+    gap_new = (clf_score_new[range(batch_size), target] - top2[:, 0]) * (indices[:, 0] != target).type(torch.float) + \
+          (clf_score_new[range(batch_size), target] - top2[:, 1]) * (indices[:, 0] == target).type(torch.float)
+
+    if cost is not None:
+        return (gap_new - gap) * (cost <= config.MODEL.COST_LIMIT).type(torch.float)
+    else:
+        return gap_new - gap
 
 
 def soft_update_from_to(source, target, tau):
@@ -250,6 +267,16 @@ def create_logger(cfg, phase='train'):
     return logger
 
 
+class MyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            return super(MyEncoder, self).default(obj)
 
 
 

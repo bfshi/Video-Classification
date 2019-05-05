@@ -27,10 +27,11 @@ from models.model import create_model
 from utils.utils import create_optimizer
 from utils.utils import create_logger
 from utils.replay_buffer import create_replay_buffer
+from utils.utils import MyEncoder
 
 
 def main():
-    # convert to train_clf mode
+    # convert to val_clf mode
     config.MODE = 'val_clf'
     extra()
 
@@ -51,12 +52,13 @@ def main():
     gpus = range(config.GPU_NUM)
     model = create_model(config, is_train=True)
 
-    if config.TRAIN.RESUME:
-        model.my_load_state_dict(torch.load(config.TRAIN.STATE_DICT), strict=True)
+    if config.TEST.RESUME:
+        model.my_load_state_dict(torch.load(config.TEST.STATE_DICT), strict=False)
 
     if not config.TRAIN_CLF.SINGLE_GPU:  # use multi gpus in parallel
         model = model.cuda(gpus[0])
-        model.backbones = torch.nn.DataParallel(model.backbones, device_ids=gpus)
+        # model.backbones = torch.nn.DataParallel(model.backbones, device_ids=gpus)
+        model = torch.nn.DataParallel(model, device_ids=gpus)
     else:  # use single gpu
         gpus = [int(i) for i in config.TRAIN_CLF.GPU.split(',')]
         os.environ["CUDA_VISIBLE_DEVICES"] = config.TRAIN_CLF.GPU
@@ -64,15 +66,6 @@ def main():
 
     # create a Loss class
     criterion = Loss(config).cuda()
-
-    # create an optimizer
-    optimizer = create_optimizer(config, model)
-
-    # create a learning rate scheduler
-    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
-        optimizer, config.TRAIN.LR_MILESTONES,
-        config.TRAIN.LR_DECAY_RATE
-    )
 
     # load data
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -124,9 +117,12 @@ def main():
                os.path.join(config.OUTPUT_DIR, 'model_clf_{acc_avg}.pth'.format(acc_avg=perf_indicator)))
 
     # output the result
-    output_file = open(os.path.join(config.OUTPUT_DIR, 'result_clf_{acc_avg}.pth'.format(acc_avg=perf_indicator)),
+    logger.info("=> saving classification result into {}".format(
+        os.path.join(config.OUTPUT_DIR, 'result_clf_{acc_avg}.json'.format(acc_avg=perf_indicator))
+    ))
+    output_file = open(os.path.join(config.OUTPUT_DIR, 'result_clf_{acc_avg}.json'.format(acc_avg=perf_indicator)),
                        'w')
-    json.dump(output_dict, output_file)
+    json.dump(output_dict, output_file, cls=MyEncoder)
     output_file.close()
 
 

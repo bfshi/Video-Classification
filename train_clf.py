@@ -51,11 +51,12 @@ def main():
     model = create_model(config, is_train=True)
 
     if config.TRAIN.RESUME:
-        model.my_load_state_dict(torch.load(config.TRAIN.STATE_DICT), strict=True)
+        model.my_load_state_dict(torch.load(config.TRAIN.STATE_DICT), strict=False)
 
     if not config.TRAIN_CLF.SINGLE_GPU:  # use multi gpus in parallel
         model = model.cuda(gpus[0])
-        model.backbones = torch.nn.DataParallel(model.backbones, device_ids=gpus)
+        # model.backbones = torch.nn.DataParallel(model.backbones, device_ids=gpus)
+        model = torch.nn.DataParallel(model, device_ids=gpus)
     else:  # use single gpu
         gpus = [int(i) for i in config.TRAIN_CLF.GPU.split(',')]
         os.environ["CUDA_VISIBLE_DEVICES"] = config.TRAIN_CLF.GPU
@@ -129,7 +130,8 @@ def main():
 
         # evaluate on validation set
         if (epoch + 1) % config.TEST.TEST_EVERY == 0:
-            perf_indicator = validate_clf(config, valid_loader, model, criterion, epoch, transform, transform_gray)
+            perf_indicator = validate_clf(config, valid_loader, model, criterion, epoch,
+                                          transform, transform_gray, sample_num_upper_bound=5)
 
             if perf_indicator > best_perf:
                 logger.info("=> saving checkpoint into {}".format(os.path.join(config.OUTPUT_DIR, 'checkpoint.pth')))

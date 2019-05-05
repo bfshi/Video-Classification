@@ -8,45 +8,29 @@ import torch.nn as nn
 from collections import OrderedDict
 
 import _init_paths
-from models.backbone import getBackbone
-from models.lstm import getLSTM
+from models.time_conv import get_time_conv
 from utils.utils import soft_update_from_to
 from utils.utils import torch_clip
 
-class Backbones(nn.Module):
-    def __init__(self, config, is_train = True):
-        super(Backbones, self).__init__()
 
-        self.config = config
-        self.rgb_backbone = getBackbone(config, is_train)
-        self.flow_backbone = getBackbone(config, is_train)
+class Q_head(nn.Module):
+    def __init__(self, feature_dim, frame_dim, modality_dim):
+        super(Q_head, self).__init__()
 
-    def forward(self, x, modality):
-        # pick different instances for different modalities
+        self.feature_dim = feature_dim
+        self.frame_dim = frame_dim
+        self.modality_dim = modality_dim
+        self.model = nn.Sequential(
+            nn.Linear(feature_dim, feature_dim - 1),
+            nn.ReLU(),
+            nn.Linear(feature_dim - 1, frame_dim * modality_dim)
+        )
 
-        # positions of instances of different modalities
-        pos = []
-        y = torch.zeros((x.shape[0], self.config.MODEL.LSTM_INDIM)).cuda()
-        for i in range(self.config.MODEL.MODALITY_NUM):
-            pos.append((modality == i).nonzero().reshape((-1)))
-
-        # feed x into different backbone
-        for i in range(self.config.MODEL.MODALITY_NUM):
-            # if no modality i, then continue
-            if pos[i].shape[0] == 0:
-                continue
-            # print(x.shape, pos[i], x[pos[i]].shape)
-            # print(y.device)
-            # print(list(self.backbone[i].parameters())[0].device)
-            # print(list(self.lstm.parameters())[0].device)
-            # print(list(self.act_head_modality.parameters())[0].device)
-            # y[pos[i]] = self.backbone[i](x[pos[i]])
-            if i == 0:
-                y[pos[i]] = self.rgb_backbone(x[pos[i]])
-            elif i == 1:
-                y[pos[i]] = self.flow_backbone(x[pos[i]])
-
-        return y
+    def forward(self, input):
+        batch_size = input.shape[0]
+        return self.model(input[:, 0: self.feature_dim])[range(batch_size),
+                                                         input[:, -2].type(torch.long) +
+                                                         (self.frame_dim * input[:, -1]).type(torch.long)]
 
 
 class VedioClfNet(nn.Module):
@@ -54,85 +38,113 @@ class VedioClfNet(nn.Module):
         super(VedioClfNet, self).__init__()
 
         self.config = config
-        self.backbones = Backbones(config, is_train=is_train)
-        self.lstm = getLSTM()
+        self.time_conv = get_time_conv()
 
-        # output [mean, std] of Gaussian distribution for frame selection
+        # output frame selection probability
         self.act_head_frame = nn.Sequential(
-            nn.Linear(config.MODEL.LSTM_OUTDIM, 2),
-            nn.Sigmoid(),
+            nn.Linear(config.MODEL.FEATURE_DIM + config.MODEL.COST_DIM, config.MODEL.FEATURE_DIM),
+            nn.ReLU(),
+            nn.Linear(config.MODEL.FEATURE_DIM, config.MODEL.FRAMEDIV_NUM),
+            nn.Softmax(dim=1),
         )
 
         # output modality selection probability
         self.act_head_modality = nn.Sequential(
-            nn.Linear(config.MODEL.LSTM_OUTDIM, config.MODEL.MODALITY_NUM),
+            nn.Linear(config.MODEL.FEATURE_DIM + config.MODEL.COST_DIM, config.MODEL.FEATURE_DIM),
+            nn.ReLU(),
+            nn.Linear(config.MODEL.FEATURE_DIM, config.MODEL.MODALITY_NUM),
             nn.Softmax(dim=1)
         )
 
         # output classification scores (not softmaxed)
-        self.clf_head = nn.Linear(config.MODEL.LSTM_OUTDIM, config.MODEL.CLFDIM)
+        self.clf_head = nn.Linear(config.MODEL.FEATURE_DIM, config.MODEL.CLFDIM)
 
         # output soft state value
-        self.v_head = nn.Linear(config.MODEL.LSTM_OUTDIM, 1)
+        self.v_head = nn.Sequential(
+            nn.Linear(config.MODEL.FEATURE_DIM + config.MODEL.COST_DIM, config.MODEL.FEATURE_DIM),
+            nn.ReLU(),
+            nn.Linear(config.MODEL.FEATURE_DIM, 1)
+        )
 
         # target v_head and synchronize params
-        self.target_v_head = nn.Linear(config.MODEL.LSTM_OUTDIM, 1)
+        self.target_v_head = nn.Sequential(
+            nn.Linear(config.MODEL.FEATURE_DIM + config.MODEL.COST_DIM, config.MODEL.FEATURE_DIM),
+            nn.ReLU(),
+            nn.Linear(config.MODEL.FEATURE_DIM, 1)
+        )
         soft_update_from_to(self.v_head, self.target_v_head, 1)
 
         # output soft state-action value
-        self.q_head = nn.Linear(config.MODEL.LSTM_OUTDIM + 1 + 1, 1)
+        self.q_head = Q_head(config.MODEL.FEATURE_DIM + config.MODEL.COST_DIM,
+                             config.MODEL.FRAMEDIV_NUM, config.MODEL.MODALITY_NUM)
 
-    def forward(self, x, modality, if_lstm = True, if_return_feature = False):
+    def forward(self, x):
         """
-        :param x: N * C * H * W
-        :param modality: N dimension array. 0-rgb_raw, 1-flow
+        :param x: N * C * T * W
         """
-        y = self.backbones(x, modality)
-        if if_lstm:
-            h, c = self.lstm(y)
-            clf_score = self.clf_head(h)
-        else:
-            h = None
-            c = None
-            clf_score = self.clf_head(y)
-        # mean, std = self.act_head_frame(h)
-        # modality_prob = self.act_head_modality(h)
-        # v_value = self.v_head(h)
+        y = self.time_conv(x)
+        clf_score = self.clf_head(y)
 
-        if if_return_feature:
-            return (h, c), clf_score, y
-        else:
-            return (h, c), clf_score
+        return clf_score, y
 
-    def policy(self, h):
+    def policy(self, y, cost_his, choice_his, if_val = False, if_random = False):
         """
         used to replay old state using current policy
-        :param h: old observation
+        :param y: old observation (N * feature_dim)
+        :param cost_his: aggregated cost before (N, )
+        :param choice_his: which have been chosen (N, modality_num, framediv_num)
         :return: new action and log of prob
         """
-        act_frame = self.act_head_frame(h)
-        mean = act_frame[:, 0]
-        std = act_frame[:, 1]
-        modality_prob = self.act_head_modality(h)
-        new_act_frame = torch_clip(torch.normal(mean, std), 0, 1, if_cuda=True)
-        new_act_modality = torch.multinomial(modality_prob, num_samples=1, replacement=True).view(-1)
-        log_pi = -torch.log((2 * np.pi) ** 0.5 * std) - \
-                 (new_act_frame - mean).pow(2) / (2 * std.pow(2)) + \
-                 torch.log(modality_prob[range(modality_prob.shape[0]), new_act_modality])
+        if not if_random:
+            y = torch.cat((y, cost_his.view(-1, 1)), dim=1)
+            frame_prob = self.act_head_frame(y)
+            modality_prob = self.act_head_modality(y)
+
+            total_prob = torch.zeros((frame_prob.shape[0], 0)).cuda()
+            for i in range(self.config.MODEL.MODALITY_NUM):
+                total_prob = torch.cat((total_prob, frame_prob * modality_prob[:, i].view(-1, 1)), dim=1)
+        else:
+            if_val = False
+            total_prob = torch.ones((y.shape[0],
+                                     self.config.MODEL.FRAMEDIV_NUM * self.config.MODEL.MODALITY_NUM)).cuda()
+
+        # cannot choose ones that have been chosen
+        total_prob *= (1 - choice_his.view(total_prob.shape[0], -1))
+        # normalization
+        total_prob /= total_prob.sum(dim=1, keepdim=True)
+
+        if if_val:
+            new_act = torch.argmax(total_prob, dim=1)
+        else:
+            new_act = torch.multinomial(total_prob, num_samples=1, replacement=True).view(-1)
+
+        new_act_frame = new_act % self.config.MODEL.FRAMEDIV_NUM
+        new_act_modality = new_act / self.config.MODEL.FRAMEDIV_NUM
+        log_pi = torch.log(total_prob[range(total_prob.shape[0]), new_act] + 1e-6)
+
+        print("new_act_frame: {}".format(new_act_frame))
+        print("new_act_modality: {}".format(new_act_modality))
 
         return new_act_frame, new_act_modality, log_pi
-
-    def init_weights(self, batch_size, h_c = None):
-
-        self.lstm.reset(batch_size, h_c)
 
     def my_load_state_dict(self, state_dict_old, strict=True):
         state_dict = OrderedDict()
         # delete 'module.' because it is saved from DataParallel module
         for key in state_dict_old.keys():
+            #if 'time_conv' in key or 'clf_head' in key:
             state_dict[key.replace('module.', '')] = state_dict_old[key]
 
         self.load_state_dict(state_dict, strict=strict)
+
+    def my_data_parallel(self, gpus):
+        self.time_conv = torch.nn.DataParallel(self.time_conv, device_ids=gpus)
+        self.clf_head = torch.nn.DataParallel(self.clf_head, device_ids=gpus)
+        self.act_head_frame = torch.nn.DataParallel(self.act_head_frame, device_ids=gpus)
+        self.act_head_modality = torch.nn.DataParallel(self.act_head_modality, device_ids=gpus)
+        self.v_head = torch.nn.DataParallel(self.v_head, device_ids=gpus)
+        self.target_v_head = torch.nn.DataParallel(self.target_v_head, device_ids=gpus)
+        self.q_head = torch.nn.DataParallel(self.q_head, device_ids=gpus)
+
 
 
 def create_model(config, is_train = True):
@@ -145,8 +157,5 @@ def create_model(config, is_train = True):
     """
 
     model = VedioClfNet(config, is_train)
-
-    if is_train and config.MODEL.INIT_WEIGHTS:
-        model.init_weights(config.TRAIN.BATCH_SIZE)
 
     return model

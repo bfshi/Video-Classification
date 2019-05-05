@@ -6,6 +6,7 @@ import argparse
 import os
 import pprint
 import shutil
+import json
 
 import torch
 import torch.nn.parallel
@@ -17,39 +18,62 @@ import torchvision.transforms as transforms
 
 import _init_paths
 from core.config import config
+from core.config import extra
 from core.function import train
 from core.function import validate
 from core.loss import Loss
 from dataset.dataset import get_dataset
 from models.model import create_model
 from utils.utils import create_optimizer
+from utils.utils import create_logger
+from utils.utils import MyEncoder
 
 
 def main():
-    #create a logger
+    # convert to val mode
+    config.MODE = 'val'
+    extra()
+
+    # create a logger
     logger = create_logger(config, 'val')
+
+    # logging configurations
+    logger.info(pprint.pformat(config))
 
     # cudnn related setting
     cudnn.benchmark = config.CUDNN.BENCHMARK
     torch.backends.cudnn.deterministic = config.CUDNN.DETERMINISTIC
     torch.backends.cudnn.enabled = config.CUDNN.ENABLED
 
-    #load a model
-    model = model = create_model(config, is_train = False)
+    # create a model
+    os.environ["CUDA_VISIBLE_DEVICES"] = config.GPUS
+    # gpus = [int(i) for i in config.GPUS.split(',')]
+    gpus = range(config.GPU_NUM)
+    model = create_model(config, is_train=True)
 
+    if config.TEST.RESUME:
+        model.my_load_state_dict(torch.load(config.TEST.STATE_DICT), strict=False)
 
-    #use multi gpus in parallel
-    gpus = [int(i) for i in config.GPUS.split(',')]
-    model = torch.nn.DataParallel(model, device_ids=gpus).cuda()
+    if not config.TRAIN_CLF.SINGLE_GPU:  # use multi gpus in parallel
+        model = model.cuda(gpus[0])
+        # model.backbones = torch.nn.DataParallel(model.backbones, device_ids=gpus)
+        model = torch.nn.DataParallel(model, device_ids=gpus)
+    else:  # use single gpu
+        gpus = [int(i) for i in config.TRAIN_CLF.GPU.split(',')]
+        os.environ["CUDA_VISIBLE_DEVICES"] = config.TRAIN_CLF.GPU
+        model = model.cuda()
 
-    #create a Loss class
+    # create a Loss class
     criterion = Loss(config).cuda()
 
     # load data
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
 
-    valid_dataset = get_dataset(if_train=False)
+    valid_dataset = get_dataset(
+        config,
+        if_train=False,
+    )
 
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset,
@@ -59,9 +83,30 @@ def main():
         pin_memory=True
     )
 
-    perf = validate(config, valid_loader, model, criterion, epoch)
+    # output result or not
+    output_dict = dict()
+    # complement some info
+    output_dict['version'] = 'VERSION 1.3'
+    output_dict['results'] = {}
+    output_dict['external_data'] = {"used": False, "details": "No details."}
 
-    # TODO: logging
+    perf_indicator = validate(config, valid_loader, model, criterion, 0,
+                              output_dict=output_dict, valid_dataset=valid_dataset)
+
+    logger.info("=> saving final model into {}".format(
+        os.path.join(config.OUTPUT_DIR, 'model_{acc_avg}.pth'.format(acc_avg=perf_indicator))
+    ))
+    torch.save(model.state_dict(),
+               os.path.join(config.OUTPUT_DIR, 'model_{acc_avg}.pth'.format(acc_avg=perf_indicator)))
+
+    # output the result
+    logger.info("=> saving classification result into {}".format(
+        os.path.join(config.OUTPUT_DIR, 'result_{acc_avg}.json'.format(acc_avg=perf_indicator))
+    ))
+    output_file = open(os.path.join(config.OUTPUT_DIR, 'result_{acc_avg}.json'.format(acc_avg=perf_indicator)),
+                       'w')
+    json.dump(output_dict, output_file, cls=MyEncoder)
+    output_file.close()
 
 if __name__ == '__main__':
     main()

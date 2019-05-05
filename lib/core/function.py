@@ -10,6 +10,7 @@ import numpy as np
 import torch
 
 import _init_paths
+from core.config import config
 from utils.utils import AverageMeter
 from utils.utils import ChooseInput
 from utils.utils import compute_reward
@@ -59,106 +60,110 @@ def train(config, train_loader, model, criterion, optimizer,
     #build recorders
     batch_time = AverageMeter()
     data_time = AverageMeter()
+    losses_batch = AverageMeter()
     clf_losses = AverageMeter()
     rl_losses = AverageMeter()
-    losses_batch = AverageMeter()
     acc = AverageMeter()
 
     #switch to train mode
     model.train()
 
     end = time.time()
-    for i, (video_path, target, meta) in enumerate(train_loader):
+    for i, (video_feature, target, meta) in enumerate(train_loader):
+
         # measure data loading time
         data_time.update(time.time() - end)
 
-        # initialize the observation for lstm
-        # ob = (h, c)
-        # use total batch-size instead of paralleled batch-size!!!
-        ob = (torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda(),
-              torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda())
-        model.init_weights(target.shape[0], ob)
-
         total_batch_size = target.shape[0]
 
-        clf_score_sum = torch.zeros((total_batch_size, config.MODEL.CLFDIM)).cuda()
+        # initialize the observation.
+        # use total batch-size instead of paralleled batch-size!!!
+        ob = torch.zeros((total_batch_size, config.MODEL.FEATURE_DIM)).cuda()
+        cost = torch.zeros((total_batch_size, )).cuda()
+        cost_new = torch.zeros((total_batch_size, )).cuda()
+        input = torch.zeros_like(video_feature)
+        # input[:, 0] += config[config.TRAIN.DATASET].RGB_MEAN
+        # input[:, 1] += config[config.TRAIN.DATASET].FLOW_MEAN
+        choice_his = torch.zeros((total_batch_size, config.MODEL.MODALITY_NUM, config.MODEL.FRAMEDIV_NUM)).cuda()
+        if_finish = torch.zeros((total_batch_size)).cuda()
+
+        clf_score = torch.zeros((total_batch_size, config.MODEL.CLFDIM)).cuda()
+        clf_score_final = torch.zeros((total_batch_size, config.MODEL.CLFDIM)).cuda()
 
         target = target.cuda(async=True)
 
-        losses_batch.reset()
+        with torch.no_grad():
+            # collect experiences until all instances have run out of cost limit.
+            while ((cost <= config.MODEL.COST_LIMIT).sum() > 0):
 
-        # train clf_head
-        for step in range(config.TRAIN.TRAIN_CLF_STEP):
+                # decide action according to model's policy and current observation
+                new_act_frame, new_act_modality, _ = model.module.policy(ob, cost, choice_his,
+                                                                         if_random=(epoch < 120))
 
-            # decide action according to model's policy and current observation
-            new_act_frame, new_act_modality, _ = model.policy(ob[0])
+                # update the input
+                # FIXME: cannot choose a frame which has been chosen
+                input[range(total_batch_size), new_act_modality, new_act_frame, :] = video_feature[range(total_batch_size), new_act_modality, new_act_frame, :]
 
-            # get the input
-            # input = ChooseInput(video, new_act_frame, new_act_modality, meta['framenum'])
-            input = load_frame(video_path, new_act_modality.detach().cpu().view(-1, 1), new_act_frame.detach().cpu().view(-1, 1),
-                               meta['framenum'], transform, transform_gray)[:, 0]
+                # compute output
+                clf_score_new, ob_new = model(input.cuda())
 
-            # compute output
-            # TODO: If backbone is not freezed, we should save input instead of feature!
-            next_ob, clf_score, feature = model(input.cuda(), new_act_modality, if_return_feature = True)
-            clf_score_sum += clf_score
+                # compute new cost
+                for j in range(config.MODEL.MODALITY_NUM):
+                   cost_new += (new_act_modality == j).type(torch.float) * config.MODEL.COST_LIST[j]
 
-            # save into replay buffer (save the copy in CPU memory)
-            replay_buffer.save((ob[0].detach().cpu(), ob[1].detach().cpu()),
-                               new_act_frame.detach().cpu(),
-                               new_act_modality.detach().cpu(),
-                               feature.detach().cpu(),
-                               target.detach().cpu(),
-                               (next_ob[0].detach().cpu(), next_ob[1].detach().cpu()),
-                               compute_reward(clf_score, target).detach().cpu())
+                # save into replay buffer (save the copy in CPU memory)
+                # reward is computed w.r.t clf_score_new - clf_score (if cost > limit then reward is 0!)
+                replay_buffer.save(ob.detach().cpu(),
+                                   cost.detach().cpu(),
+                                   choice_his.detach().cpu(),
+                                   new_act_frame.detach().cpu(),
+                                   new_act_modality.detach().cpu(),
+                                   ob_new.detach().cpu(),
+                                   cost_new.detach().cpu(),
+                                   compute_reward(clf_score_new.clone(), clf_score.clone(), target, cost_new).detach().cpu())
 
-            # compute loss
-            loss = criterion.clf_loss(clf_score, target)
+                print('reward = {}'.format(compute_reward(clf_score_new.clone(), clf_score.clone(), target, cost_new)))
 
-            # back prop
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            # update batch loss
-            losses_batch.update(loss.item(), input.shape[0])
-
-            # update ob
-            ob = next_ob
+                # update ob, cost, clf_score, if_finish, choice_his
+                ob = ob_new.clone()
+                clf_score_final += clf_score * \
+                                   ((cost_new > config.MODEL.COST_LIMIT).type(torch.float) - if_finish).view(-1, 1)
+                clf_score = clf_score_new.clone()
+                cost = cost_new.clone()
+                if_finish = (cost_new > config.MODEL.COST_LIMIT).type(torch.float)
+                choice_his[range(total_batch_size), new_act_modality, new_act_frame] = 1
 
         # update acc
-        avg_acc = compute_acc(clf_score_sum, target)
+        avg_acc = compute_acc(clf_score_final, target)
         acc.update(avg_acc, total_batch_size)
 
-        #update total clf_loss
-        clf_losses.update(losses_batch.avg, losses_batch.count)
+        # update total clf_loss
+        loss = criterion.clf_loss(clf_score_final, target)
+        clf_losses.update(loss, total_batch_size)
 
         losses_batch.reset()
 
-        # TODO: In early stage we could only train classifier.
         # train the policy
         for step in range(config.TRAIN.TRAIN_RL_STEP):
+            if epoch < 5:
+                break
 
             # sample from replay buffer a minibatch
-            ob, act_frame, act_modality, feature, target, next_ob, reward = \
+            ob, cost, choice_his, act_frame, act_modality, next_ob, next_cost, reward = \
                 replay_buffer.get_batch(config.TRAIN.RL_BATCH_SIZE)
 
-            # reset lstm's h and c
-            model.init_weights(ob[0].shape[0], ob)
-
-            # update reward and next_ob (shouldn't use the old ones)
-            h, c = model.lstm(feature)
-            clf_score = model.clf_head(h)
-            next_ob = (h, c)
-            reward = compute_reward(clf_score, target)
-
             # calculate new outputs
-            q_pred = model.q_head(torch.cat((ob[0], act_frame.view(-1, 1), act_modality.view(-1, 1)), 1))
-            v_pred = model.v_head(ob[0])
+            q_pred = model.module.q_head(torch.cat((ob, cost.view(-1, 1),
+                                             act_frame.view(-1, 1), act_modality.view(-1, 1)), 1))
+            v_pred = model.module.v_head(torch.cat((ob, cost.view(-1, 1)), -1))
 
-            new_act_frame, new_act_modality, log_pi = model.policy(ob[0])
-            q_new_actions = model.q_head(torch.cat((ob[0], new_act_frame.view(-1, 1), new_act_modality.type(dtype=torch.float).view(-1, 1)), 1))
-            target_v_pred_next = model.target_v_head(ob[0])
+            new_act_frame, new_act_modality, log_pi = model.module.policy(ob, cost, choice_his)
+            q_new_actions = model.module.q_head(torch.cat((ob, cost.view(-1, 1),
+                                                    new_act_frame.type(dtype=torch.float).view(-1, 1),
+                                                    new_act_modality.type(dtype=torch.float).view(-1, 1)), 1))
+            # FIXME
+            # target_v_pred_next = model.target_v_head(ob[0])
+            target_v_pred_next = model.module.target_v_head(torch.cat((next_ob, next_cost.view(-1, 1)), 1))
 
             # compute the loss
             loss = criterion.rl_loss(reward, q_pred, v_pred, target_v_pred_next, log_pi, q_new_actions)
@@ -171,11 +176,14 @@ def train(config, train_loader, model, criterion, optimizer,
             # update batch loss
             losses_batch.update(loss.item(), input.shape[0])
 
+            print('q_pred: {}'.format(q_pred))
+            print('v_pred: {}'.format(v_pred))
+
         # update total rl_loss
         rl_losses.update(losses_batch.avg, losses_batch.count)
 
         # soft update
-        soft_update_from_to(model.v_head, model.target_v_head, config.TRAIN.SOFT_UPDATE)
+        soft_update_from_to(model.module.v_head, model.module.target_v_head, config.TRAIN.SOFT_UPDATE)
 
         # update time record
         batch_time.update(time.time() - end)
@@ -197,9 +205,8 @@ def train(config, train_loader, model, criterion, optimizer,
             logger.info(msg)
 
 
-# TODO: update validate
-
-def validate(config, val_loader, model, criterion, epoch, transform = None, transform_gray = None):
+def validate(config, val_loader, model, criterion, epoch, transform = None, transform_gray = None,
+             output_dict=None, valid_dataset=None):
     """
     validating method
 
@@ -210,11 +217,14 @@ def validate(config, val_loader, model, criterion, epoch, transform = None, tran
     :param epoch: current epoch
     :return: performance indicator
     """
+    # whether to output the result
+    if_output_result = (valid_dataset != None)
+    label_head = ['label' for i in range(config.MODEL.CLFDIM)]
+    score_head = ['score' for i in range(config.MODEL.CLFDIM)]
 
     # build recorders
     batch_time = AverageMeter()
     clf_losses = AverageMeter()
-    losses_batch = AverageMeter()
     acc = AverageMeter()
 
     #switch to val mode
@@ -223,51 +233,63 @@ def validate(config, val_loader, model, criterion, epoch, transform = None, tran
     with torch.no_grad():
 
         end = time.time()
-        for i, (video_path, target, meta) in enumerate(val_loader):
-
-            # initialize the observation
-            # ob = (h, c)
-            ob = (torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda(),
-                  torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda())
-            model.init_weights(target.shape[0], ob)
+        for i, (video_feature, target, meta) in enumerate(val_loader):
 
             total_batch_size = target.shape[0]
 
-            clf_score_sum = torch.zeros((total_batch_size, config.MODEL.CLFDIM)).cuda()
+            # initialize the observation.
+            # use total batch-size instead of paralleled batch-size!!!
+            ob = torch.zeros((total_batch_size, config.MODEL.FEATURE_DIM)).cuda()
+            cost = torch.zeros((total_batch_size,)).cuda()
+            cost_new = torch.zeros((total_batch_size,)).cuda()
+            input = torch.zeros_like(video_feature)
+            # input[:, 0] += config[config.TRAIN.DATASET].RGB_MEAN
+            # input[:, 1] += config[config.TRAIN.DATASET].FLOW_MEAN
+            choice_his = torch.zeros((total_batch_size, config.MODEL.MODALITY_NUM, config.MODEL.FRAMEDIV_NUM)).cuda()
+            if_finish = torch.zeros((total_batch_size)).cuda()
+
+            clf_score = torch.zeros((total_batch_size, config.MODEL.CLFDIM)).cuda()
+            clf_score_final = torch.zeros((total_batch_size, config.MODEL.CLFDIM)).cuda()
 
             target = target.cuda()
 
-            losses_batch.reset()
+            # collect experiences until all instances have run out of cost limit.
+            while ((cost <= config.MODEL.COST_LIMIT).sum() > 0):
 
-            #TODO: how to decide when to stop?
-            for step in range(config.TEST.TEST_STEP):
                 # decide action according to model's policy and current observation
-                new_act_frame, new_act_modality, _ = model.policy(ob[0])
+                new_act_frame, new_act_modality, _ = model.module.policy(ob, cost, choice_his,
+                                                                         if_random = False, if_val=True)
 
                 # get the input
                 # input = ChooseInput(video, new_act_frame, new_act_modality, meta['framenum'])
-                input = load_frame(video_path, new_act_modality.cpu().view(-1, 1), new_act_frame.cpu().view(-1, 1),
-                                   meta['framenum'], transform, transform_gray)[:, 0]
+                input[range(total_batch_size), new_act_modality, new_act_frame, :] = video_feature[range(total_batch_size), new_act_modality, new_act_frame, :]
 
                 # compute output
-                next_ob, clf_score = model(input.cuda(), new_act_modality)
-                clf_score_sum += clf_score
+                clf_score_new, ob_new = model(input.cuda())
 
-                # compute loss
-                loss = criterion.clf_loss(clf_score, target)
+                # compute new cost
+                for j in range(config.MODEL.MODALITY_NUM):
+                    cost_new += (new_act_modality == j).type(torch.float) * config.MODEL.COST_LIST[j]
 
-                # update batch loss
-                losses_batch.update(loss.item(), input.shape[0])
+                print('reward = {}'.format(compute_reward(clf_score_new, clf_score, target, cost_new)))
 
-                # update ob
-                ob = next_ob
+                # update ob, cost and clf_score, if_finish, choice_his
+                ob = ob_new.clone()
+                clf_score_final += clf_score * \
+                                   ((cost_new > config.MODEL.COST_LIMIT).type(torch.float) - if_finish).view(-1, 1)
+                clf_score = clf_score_new.clone()
+                cost = cost_new.clone()
+                if_finish = (cost_new > config.MODEL.COST_LIMIT).type(torch.float)
+                choice_his[range(total_batch_size), new_act_modality, new_act_frame] = 1
 
             # update acc
-            avg_acc = compute_acc(clf_score_sum, target)
+            avg_acc = compute_acc(clf_score_final, target)
             acc.update(avg_acc, total_batch_size)
 
             # update total clf_loss
-            clf_losses.update(losses_batch.avg, losses_batch.count)
+            loss = criterion.clf_loss(clf_score_final, target)
+            clf_losses.update(loss, total_batch_size)
+            # clf_losses.update(losses_batch.avg, losses_batch.count)
 
             batch_time.update(time.time() - end)
             end = time.time()
@@ -281,6 +303,13 @@ def validate(config, val_loader, model, criterion, epoch, transform = None, tran
                     i, len(val_loader), batch_time=batch_time,
                     loss=clf_losses, acc=acc)
                 logger.info(msg)
+            if if_output_result:
+                clf_score_final = torch.nn.functional.softmax(clf_score_final, dim=1).cpu().numpy()
+                for j in range(total_batch_size):
+                    temp = list(zip(list(zip(score_head, clf_score_final[j])),
+                                    list(zip(label_head, valid_dataset.label_list))))
+                    output_dict['results'][meta['name'][j]] = list(map(dict, temp))
+
 
     return acc.avg
 
@@ -310,57 +339,48 @@ def train_clf(config, train_loader, model, criterion, optimizer, epoch, transfor
     model.train()
 
     end = time.time()
-    for i, (video_path, target, meta) in enumerate(train_loader):
+    for i, (video_feature, target, meta) in enumerate(train_loader):
+        print(video_feature.mean())
         # clear cache
         # torch.cuda.empty_cache()
 
         # measure data loading time
         data_time.update(time.time() - end)
 
-        # initialize the observation for lstm
-        # ob = (h, c)
-        # use total batch-size instead of paralleled batch-size!!!
-        ob = (torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda(),
-              torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda())
-        model.init_weights(target.shape[0], ob)
-
         total_batch_size = target.shape[0]
 
         # unsorted sampling.
-        frame_chosen = choose_frame_randomly(total_batch_size, config.TRAIN_CLF.SAMPLE_NUM,
-                                             meta['segment'], meta['duration'], config.TRAIN_CLF.IF_TRIM)
-        modality_chosen = choose_modality_randomly(total_batch_size, config.MODEL.MODALITY_NUM,
-                                                   config.TRAIN_CLF.SAMPLE_NUM)
+        # frame_chosen = choose_frame_randomly(total_batch_size, config.TRAIN_CLF.SAMPLE_NUM,
+        #                                      meta['segment'], meta['duration'], config.TRAIN_CLF.IF_TRIM)
+        # modality_chosen = choose_modality_randomly(total_batch_size, config.MODEL.MODALITY_NUM,
+        #                                            config.TRAIN_CLF.SAMPLE_NUM)
+        if config.TRAIN_CLF.RANDOM_SAMPLE_NUM:
+            config.TRAIN_CLF.SAMPLE_NUM = np.random.randint(config.MODEL.FRAMEDIV_NUM) + 1
 
-        clf_score_sum = torch.zeros((total_batch_size, config.MODEL.CLFDIM)).cuda()
+        frame_chosen = torch.multinomial(
+            input=torch.ones((config.MODEL.FRAMEDIV_NUM)) / config.MODEL.FRAMEDIV_NUM,
+            num_samples=config.TRAIN_CLF.SAMPLE_NUM)
+        modality_chosen = torch.multinomial(
+            input=torch.ones((config.MODEL.MODALITY_NUM)) / config.MODEL.MODALITY_NUM,
+            num_samples=config.TRAIN_CLF.SAMPLE_NUM, replacement=True)
 
         target = target.cuda(async=True)
 
-        # input_whole = N * sample_num * C * H * W
-        input_whole = load_frame(video_path, modality_chosen, frame_chosen,
-                           meta['framenum'], transform, transform_gray)
+        input = torch.zeros_like(video_feature)
+        # input[:, 0] += config[config.TRAIN.DATASET].RGB_MEAN
+        # input[:, 1] += config[config.TRAIN.DATASET].FLOW_MEAN
+        input[:, modality_chosen, frame_chosen, :] = video_feature[:, modality_chosen, frame_chosen, :]
 
-        for j in range(config.TRAIN_CLF.SAMPLE_NUM):
-            # input = N * C * H * W (contains probably different modalities)
-            input = input_whole[:, j]
+        # compute the output
 
-            # compute output
-            _, clf_score = model(input.cuda(), modality_chosen[:, j].cuda(), config.TRAIN_CLF.IF_LSTM)
-
-            # accumulate clf_score
-            clf_score_sum += clf_score
-            # if j == 0:
-            #     clf_score_sum = clf_score
-            # else:
-            #     temp = (clf_score.max(dim = 1, keepdim = True)[0] > clf_score_sum.max(dim = 1, keepdim = True)[0]).type(torch.float32)
-            #     clf_score_sum = temp * clf_score + (1 - temp) * clf_score_sum
+        clf_score, _ = model(input.cuda())
 
         # update acc
-        avg_acc = compute_acc(clf_score_sum, target)
+        avg_acc = compute_acc(clf_score, target)
         acc.update(avg_acc, total_batch_size)
 
         # compute loss
-        loss = criterion.clf_loss(clf_score_sum, target)
+        loss = criterion.clf_loss(clf_score, target)
 
         # back prop
         optimizer.zero_grad()
@@ -389,7 +409,7 @@ def train_clf(config, train_loader, model, criterion, optimizer, epoch, transfor
 
 
 def validate_clf(config, val_loader, model, criterion, epoch = 0, transform = None, transform_gray = None,
-                 output_dict = None, valid_dataset = None):
+                 output_dict = None, valid_dataset = None, sample_num_upper_bound = config.MODEL.FRAMEDIV_NUM):
     """
     validate backbone, lstm and clf_head only.
     unsorted sampling is used for each video.
@@ -417,46 +437,38 @@ def validate_clf(config, val_loader, model, criterion, epoch = 0, transform = No
     with torch.no_grad():
 
         end = time.time()
-        for i, (video_path, target, meta) in enumerate(val_loader):
-
-            # initialize the observation
-            # ob = (h, c)
-            ob = (torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda(),
-                  torch.zeros((target.shape[0], config.MODEL.LSTM_OUTDIM)).cuda())
-            model.init_weights(target.shape[0], ob)
+        for i, (video_feature, target, meta) in enumerate(val_loader):
 
             total_batch_size = target.shape[0]
 
-            # unsorted sampling.
-            frame_chosen = choose_frame_randomly(total_batch_size, config.TRAIN_CLF.SAMPLE_NUM,
-                                                 meta['segment'], meta['duration'], config.TEST.IF_TRIM)
-            modality_chosen = choose_modality_randomly(total_batch_size, config.MODEL.MODALITY_NUM,
-                                                       config.TRAIN_CLF.SAMPLE_NUM)
+            # if config.TRAIN_CLF.RANDOM_SAMPLE_NUM:
+            #     config.TRAIN_CLF.SAMPLE_NUM = np.random.randint(sample_num_upper_bound) + 1
 
-            clf_score_sum = torch.zeros((total_batch_size, config.MODEL.CLFDIM)).cuda()
+            # frame_chosen = torch.multinomial(
+            #     input=torch.ones((config.MODEL.FRAMEDIV_NUM)) / config.MODEL.FRAMEDIV_NUM,
+            #     num_samples=config.TRAIN_CLF.SAMPLE_NUM)
+            frame_chosen = (choose_frame_randomly(1, 15) * config.MODEL.FRAMEDIV_NUM).type(torch.long).view(-1)
+            modality_chosen = torch.multinomial(
+                input=torch.ones((config.MODEL.MODALITY_NUM)) / config.MODEL.MODALITY_NUM,
+                num_samples=config.TRAIN_CLF.SAMPLE_NUM, replacement=True)
 
             target = target.cuda()
 
-            input_whole = load_frame(video_path, modality_chosen, frame_chosen,
-                                     meta['framenum'], transform, transform_gray)
+            input = torch.zeros_like(video_feature)
+            # input[:, 0] += config[config.TRAIN.DATASET].RGB_MEAN
+            # input[:, 1] += config[config.TRAIN.DATASET].FLOW_MEAN
+            input[:, modality_chosen, frame_chosen, :] = video_feature[:, modality_chosen, frame_chosen, :]
 
-            # TODO: load frames when training. (refer to train_clf)
-            for j in range(config.TRAIN_CLF.SAMPLE_NUM):
-                # single modality feature: N * frame_num * channel * H * W
-                input = input_whole[:, j]
+            # compute the output
 
-                # compute output
-                _, clf_score = model(input.cuda(), modality_chosen[:, j].cuda(), config.TRAIN_CLF.IF_LSTM)
+            clf_score, _ = model(input.cuda())
 
-                # accumulate clf_score
-                clf_score_sum += clf_score
-
-            #update acc
-            avg_acc = compute_acc(clf_score_sum, target)
+            # update acc
+            avg_acc = compute_acc(clf_score, target)
             acc.update(avg_acc, total_batch_size)
 
             # compute loss
-            loss = criterion.clf_loss(clf_score_sum, target)
+            loss = criterion.clf_loss(clf_score, target)
 
             # update total clf_loss
             clf_losses.update(loss.item(), total_batch_size)
@@ -475,9 +487,11 @@ def validate_clf(config, val_loader, model, criterion, epoch = 0, transform = No
                 logger.info(msg)
 
             if if_output_result:
+                clf_score = torch.nn.functional.softmax(clf_score, dim=1).cpu().numpy()
                 for j in range(total_batch_size):
-                    temp = list(zip(list(zip(score_head, clf_score_sum[j])),
+                    temp = list(zip(list(zip(score_head, clf_score[j])),
                                     list(zip(label_head, valid_dataset.label_list))))
-                    output_dict['results'][meta['label'][j]] = list(map(dict, temp))
+                    output_dict['results'][meta['name'][j]] = list(map(dict, temp))
+
 
     return acc.avg

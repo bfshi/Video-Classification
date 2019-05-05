@@ -31,8 +31,6 @@ class VideoSet(Dataset):
         self.label_dic = {}
         # label_list = ['label1', 'label2', ...]
         self.label_list = []
-        # name_list = ['name1', 'name2', ...]
-        self.name_list = []
         # *_feature_list = [tensor1, tensor2, ...]
         self.rgb_feature_list = []
         self.flow_feature_list = []
@@ -49,6 +47,126 @@ class VideoSet(Dataset):
         implemented in child class
         """
         return None
+
+
+class ActivityNet(VideoSet):
+    def __init__(self, config, if_train=True, transform=None):
+        super().__init__(config, if_train=if_train, transform=transform)
+        self.load_dataset()
+
+    def load_dataset(self):
+        """
+        load video_info and label_dic
+        """
+        # load label_idx
+        with open(self.config.TRAIN.DATAROOT + self.config.TRAIN.DATASET
+                  + '/label_index.csv', 'r') as labelfile:
+            reader = csv.DictReader(labelfile)
+            for line in reader:
+                self.label_dic[line['label']] = int(line['label_idx'])
+                self.label_list.append(line['label'])
+
+        # load video info from .json
+        with open(self.config.TRAIN.DATAROOT + self.config.TRAIN.DATASET +
+                  '/activity_net.v1-3.min.json', 'r') as annfile:
+            anndata = json.load(annfile)
+
+        video_info_dict = {}
+
+        for video_name, v in anndata['database'].items():
+            # only training or validation
+            if v['subset'] != self.mode:
+                continue
+
+            video_info_dict[video_name] = {
+                'name': video_name,
+                'metadata': {
+                    'framenum': 0,  # decided later
+                    'duration': v['duration'],
+                    'segment': v['annotations'][0]['segment']
+                },
+                'label': v['annotations'][0]['label']
+            }
+
+        # load framenum
+
+        # using numFrame in video_numframe_correction.csv which is precise.
+
+        with open(self.config.TRAIN.DATAROOT + self.config.TRAIN.DATASET
+                  + '/video_info_new.csv', 'r') as infofile:
+            with open(self.config.TRAIN.DATAROOT + self.config.TRAIN.DATASET
+                      + '/video_numframe_correction.csv', 'r') as correction_file:
+                lines = csv.DictReader(infofile)
+                correction_lines = csv.DictReader(correction_file)
+                for line, correction_line in zip(lines, correction_lines):
+                    if line['subset'] != self.mode:
+                        continue
+                    if line['video'][2:] in self.config.ActivityNet.BLOCKED_VIDEO:
+                        continue
+                    line['video'] = line['video'][2:]
+                    video_info_dict[line['video']]['metadata']['framenum'] = int(correction_line['numFrame'])
+                    self.video_info.append(video_info_dict[line['video']])
+
+
+        # count number of frames for each video
+        # video_info is sorted in alphabetic order
+
+        # with open(self.config.TRAIN.DATAROOT + self.config.TRAIN.DATASET + '/video_info_new.csv', 'r') as infofile:
+        #     lines = csv.DictReader(infofile)
+        #     for line in lines:
+        #         if line['subset'] != self.mode:
+        #             continue
+        #         line['video'] = line['video'][2:]
+        #         video_info_dict[line['video']]['metadata']['framenum'] = \
+        #             glob.glob(os.path.join(self.config.TRAIN.DATAROOT, self.config.TRAIN.DATASET,
+        #                                    'frame_flow', line['video'], 'img_*.jpg')).__len__()
+        #         self.video_info.append(video_info_dict[line['video']])
+        #         # load label_dict
+        #         if video_info_dict[line['video']]['label'] not in self.label_dic:
+        #             self.label_dic[video_info_dict[line['video']]['label']] = label_cnt
+        #             label_cnt += 1
+
+    def __getitem__(self, idx):
+        """
+        fetch item using idx
+        :param idx: index of item
+        :return: input, label_idx, meta = {'framenum': xxx, 'label': 'label_name'}
+        """
+        item_info = self.video_info[idx]
+        frame_flow_path = os.path.join(self.config.TRAIN.DATAROOT, self.config.TRAIN.DATASET,
+                                       'frame_flow', item_info['name'])
+
+        # # read rgb features
+        # rgb_feature_list = [np.transpose(cv2.imread(os.path.join(frame_flow_path, 'img_%.5d.jpg' % i),
+        #                           cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION), (2, 0, 1))
+        #                for i in range(1, item_info['metadata']['framenum'] + 1)]
+        # rgb_feature = np.stack(rgb_feature_list)
+        #
+        # # read flow features
+        # # x_channel + y_channel + zero_channel (for size compatibility)
+        # flow_feature_list = [np.stack([cv2.imread(os.path.join(frame_flow_path, 'flow_x_%.5d.jpg' % i),
+        #                           cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION),
+        #                               cv2.imread(os.path.join(frame_flow_path, 'flow_y_%.5d.jpg' % i),
+        #                           cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION),
+        #                                np.zeros((rgb_feature.shape[2], rgb_feature.shape[3]))]
+        #                      ) for i in range(1, item_info['metadata']['framenum'] + 1)]
+        # flow_feature = np.stack(flow_feature_list)
+        #
+        # # transform
+        # # TODO: TOTensor only accept input of size (H, W, C)!
+        # if self.rgb_transform:
+        #     rgb_feature = self.rgb_transform(rgb_feature)
+        #     flow_feature = self.flow_transform(flow_feature)
+        #
+        # input = [rgb_feature, flow_feature]
+
+        label_idx = self.label_dic[item_info['label']]
+
+        meta = item_info['metadata']
+        meta['label'] = item_info['label']
+        meta['name'] = item_info['name']
+
+        return frame_flow_path, label_idx, meta
 
 
 class ActivityNet_I3D(VideoSet):
@@ -129,16 +247,11 @@ class ActivityNet_I3D(VideoSet):
                     else:
                         cnt += 1
                         print(cnt)
-                        # if cnt > 200:
-                        #     break
-
 
                         self.rgb_feature_list.append(torch.FloatTensor(rgb_feature))
                         self.flow_feature_list.append(torch.FloatTensor(flow_feature))
                         video_info_dict[line['video']]['metadata']['framenum'] = rgb_feature.shape[0]
                         self.video_info.append(video_info_dict[line['video']])
-                        self.name_list.append(line['video'])
-
 
 
     def __getitem__(self, idx):
@@ -155,12 +268,10 @@ class ActivityNet_I3D(VideoSet):
         meta['label'] = item_info['label']
         meta['name'] = item_info['name']
 
-        sample = torch.FloatTensor(range(self.config.MODEL.FRAMEDIV_NUM)) / self.config.MODEL.FRAMEDIV_NUM
-        sample = (sample * meta['framenum']).type(torch.long)
-
-        return torch.stack([self.rgb_feature_list[idx][sample, :],
-                            self.flow_feature_list[idx][sample, :],
-                            ]), \
+        return torch.stack([torch.cat((self.rgb_feature_list[idx],
+                                      torch.zeros((3000 - self.rgb_feature_list[idx].shape[0], 1024)))),
+                            torch.cat((self.flow_feature_list[idx],
+                                      torch.zeros((3000 - self.flow_feature_list[idx].shape[0], 1024))))]), \
                label_idx, meta
 
 
