@@ -171,6 +171,29 @@ def load_frame(video_path, modality_chosen, frame_chosen, framenum, transform = 
 
         return torch.stack(input)
 
+def update_input(input, video_feature, choice_his, frame_chosen, modality_chosen):
+    """
+    :param input: [N, modality_num, framediv_num, feature_dim]
+    :param video_feature: [N, modality_num, framediv_num, feature_dim]
+    :param choice_his: [N, modality_num, framediv_num]
+    :param frame_chosen: [N]
+    :param modality_chosen: [N]
+    """
+    batch_size = input.shape[0]
+    for i in range(batch_size):
+        for j in range(config.MODEL.MODALITY_NUM):
+            if j != modality_chosen[i]:
+                continue
+            start = frame_chosen[i]
+            nonzero = choice_his[i, j, start:].nonzero()
+            if nonzero.shape[0] == 0:
+                input[i, j, start:, :] = video_feature[i, j, start, :]
+            else:
+                input[i, j, start: start + nonzero[0, 0], :] = video_feature[i, j, start, :]
+
+    return input
+
+
 def torch_clip(tensor, lower, upper, if_cuda=False):
     lower = torch.Tensor(lower).new_full((tensor.shape[0],), lower)
     upper = torch.Tensor(upper).new_full((tensor.shape[0],), upper)

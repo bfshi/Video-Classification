@@ -13,8 +13,8 @@ config = edict()
 
 # common configs
 
-config.GPUS = '4, 5, 6, 7'
-config.GPU_NUM = 4
+config.GPUS = '0, 1, 2'
+config.GPU_NUM = 2
 config.WORKERS = 4
 # config.DATASET = 'ActivityNet'
 config.MODE = 'train_clf'  # train / train_clf
@@ -42,7 +42,7 @@ config.ActivityNet_I3D.BLANK_VIDEO = 'blank_video.csv'
 config.ActivityNet_I3D.BLOCKED_VIDEO = []  # incomplete frames(loaded in L132)
 config.ActivityNet_I3D.RGB_COST = 1
 config.ActivityNet_I3D.FLOW_COST = 1
-config.ActivityNet_I3D.COST_LIMIT = 15
+config.ActivityNet_I3D.COST_LIMIT = 10
 config.ActivityNet_I3D.RGB_MEAN = 0.118
 config.ActivityNet_I3D.FLOW_MEAN = 0.144
 
@@ -62,7 +62,7 @@ config.MODEL.FEATURE_DIM = 1024  # for pre-extracted feature
 config.MODEL.COST_DIM = 1
 config.MODEL.CLFDIM = 200
 config.MODEL.FRAMEDIV_NUM = 128  # output dimension of act_head_frame
-config.MODEL.MODALITY_NUM = 2
+config.MODEL.MODALITY_NUM = 1
 
 config.MODEL.RESNET_TYPE = 50
 config.MODEL.INIT_WEIGHTS = True
@@ -77,7 +77,7 @@ config.MODEL.COST_LIMIT = 0
 
 config.TRAIN = edict()
 
-config.TRAIN.RESUME = True  # whether to continue previous training
+config.TRAIN.RESUME = False  # whether to continue previous training
 config.TRAIN.STATE_DICT = 'train_clf/random_5_model_clf_2019-05-01-11-46_0.348.pth'
 # config.TRAIN.STATE_DICT = 'train_clf/checkpoint.pth'
 
@@ -91,9 +91,9 @@ config.TRAIN.IF_BACKBONE = True
 config.TRAIN.DATAROOT = '/m/shibf/video_classification/data/'
 config.TRAIN.DATASET = 'ActivityNet_I3D'
 
-config.TRAIN.LR = 0.0005
+config.TRAIN.LR = 0.001
 config.TRAIN.LR_DECAY_RATE = 0.5
-config.TRAIN.LR_MILESTONES = [8, 15, 30]  # at which epoch lr decays
+config.TRAIN.LR_MILESTONES = [30, 60, 90]  # at which epoch lr decays
 config.TRAIN.SOFT_UPDATE = 0.001  # 0.005 in SAC paper / 0.01 in rlkit
 
 config.TRAIN.OPTIMIZER = 'sgd'
@@ -124,7 +124,7 @@ config.TRAIN.PRINT_EVERY = 1
 config.TRAIN_CLF = edict()
 
 config.TRAIN_CLF.RANDOM_SAMPLE_NUM = True
-config.TRAIN_CLF.SAMPLE_NUM = 15
+config.TRAIN_CLF.SAMPLE_NUM = 128
 config.TRAIN_CLF.IF_TRIM = True
 
 config.TRAIN_CLF.IF_BACKBONE = True
@@ -138,11 +138,11 @@ config.TRAIN_CLF.GPU = '1'  # which to use when SINGLE_GPU == True
 config.TEST = edict()
 
 config.TEST.RESUME = True
-config.TEST.STATE_DICT = 'train/checkpoint_0.5399503722084368.pth'
+config.TEST.STATE_DICT = 'train_clf/model_clf_0.7218362282878412.pth'
 
 config.TEST.IF_TRIM = True
 
-config.TEST.TEST_EVERY = 1
+config.TEST.TEST_EVERY = 5
 
 config.TEST.TEST_STEP = 5
 

@@ -19,6 +19,7 @@ from utils.utils import compute_acc
 from utils.utils import load_frame
 from utils.utils import choose_frame_randomly
 from utils.utils import choose_modality_randomly
+from utils.utils import update_input
 
 
 logger = logging.getLogger(__name__)
@@ -340,7 +341,6 @@ def train_clf(config, train_loader, model, criterion, optimizer, epoch, transfor
 
     end = time.time()
     for i, (video_feature, target, meta) in enumerate(train_loader):
-        print(video_feature.mean())
         # clear cache
         # torch.cuda.empty_cache()
 
@@ -350,12 +350,9 @@ def train_clf(config, train_loader, model, criterion, optimizer, epoch, transfor
         total_batch_size = target.shape[0]
 
         # unsorted sampling.
-        # frame_chosen = choose_frame_randomly(total_batch_size, config.TRAIN_CLF.SAMPLE_NUM,
-        #                                      meta['segment'], meta['duration'], config.TRAIN_CLF.IF_TRIM)
-        # modality_chosen = choose_modality_randomly(total_batch_size, config.MODEL.MODALITY_NUM,
-        #                                            config.TRAIN_CLF.SAMPLE_NUM)
         if config.TRAIN_CLF.RANDOM_SAMPLE_NUM:
             config.TRAIN_CLF.SAMPLE_NUM = np.random.randint(config.MODEL.FRAMEDIV_NUM) + 1
+            # config.TRAIN_CLF.SAMPLE_NUM = np.random.randint(5) + 1
 
         frame_chosen = torch.multinomial(
             input=torch.ones((config.MODEL.FRAMEDIV_NUM)) / config.MODEL.FRAMEDIV_NUM,
@@ -366,10 +363,10 @@ def train_clf(config, train_loader, model, criterion, optimizer, epoch, transfor
 
         target = target.cuda(async=True)
 
-        input = torch.zeros_like(video_feature)
-        # input[:, 0] += config[config.TRAIN.DATASET].RGB_MEAN
-        # input[:, 1] += config[config.TRAIN.DATASET].FLOW_MEAN
+        input = torch.zeros((total_batch_size, config.MODEL.MODALITY_NUM,
+                             config.MODEL.FRAMEDIV_NUM, config.MODEL.FEATURE_DIM))
         input[:, modality_chosen, frame_chosen, :] = video_feature[:, modality_chosen, frame_chosen, :]
+        # input = video_feature[:, 0: config.MODEL.MODALITY_NUM].clone()
 
         # compute the output
 
@@ -441,23 +438,25 @@ def validate_clf(config, val_loader, model, criterion, epoch = 0, transform = No
 
             total_batch_size = target.shape[0]
 
-            # if config.TRAIN_CLF.RANDOM_SAMPLE_NUM:
-            #     config.TRAIN_CLF.SAMPLE_NUM = np.random.randint(sample_num_upper_bound) + 1
+            if config.TRAIN_CLF.RANDOM_SAMPLE_NUM:
+                config.TRAIN_CLF.SAMPLE_NUM = np.random.randint(sample_num_upper_bound) + 1
+                # config.TRAIN_CLF.SAMPLE_NUM = np.random.randint(5) + 1
 
-            # frame_chosen = torch.multinomial(
-            #     input=torch.ones((config.MODEL.FRAMEDIV_NUM)) / config.MODEL.FRAMEDIV_NUM,
-            #     num_samples=config.TRAIN_CLF.SAMPLE_NUM)
-            frame_chosen = (choose_frame_randomly(1, 15) * config.MODEL.FRAMEDIV_NUM).type(torch.long).view(-1)
+            frame_chosen = torch.multinomial(
+                input=torch.ones((config.MODEL.FRAMEDIV_NUM)) / config.MODEL.FRAMEDIV_NUM,
+                num_samples=config.TRAIN_CLF.SAMPLE_NUM)
+            # frame_chosen = (choose_frame_randomly(1, 15) * config.MODEL.FRAMEDIV_NUM).type(torch.long).view(-1)
             modality_chosen = torch.multinomial(
                 input=torch.ones((config.MODEL.MODALITY_NUM)) / config.MODEL.MODALITY_NUM,
                 num_samples=config.TRAIN_CLF.SAMPLE_NUM, replacement=True)
 
             target = target.cuda()
 
-            input = torch.zeros_like(video_feature)
-            # input[:, 0] += config[config.TRAIN.DATASET].RGB_MEAN
-            # input[:, 1] += config[config.TRAIN.DATASET].FLOW_MEAN
+            input = torch.zeros((total_batch_size, config.MODEL.MODALITY_NUM,
+                                 config.MODEL.FRAMEDIV_NUM, config.MODEL.FEATURE_DIM))
             input[:, modality_chosen, frame_chosen, :] = video_feature[:, modality_chosen, frame_chosen, :]
+            # input = video_feature[:, 0: config.MODEL.MODALITY_NUM].clone()
+
 
             # compute the output
 

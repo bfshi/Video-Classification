@@ -14,7 +14,7 @@ from core.config import config
 
 basic_block_num = 2
 conv_per_block = 3
-norm_type = 'l2_norm'  # batch_norm / l2_norm
+norm_type = 'instance_norm'  # batch_norm / l2_norm / instance_norm
 in_channels = [64, 64]
 out_channels = [64, 64]
 kernel_size = [7, 7]
@@ -50,19 +50,19 @@ class Basic_Block(nn.Module):
         self.conv1 = nn.Conv2d(in_channels=in_channels[0], out_channels=out_channels[0],
                                kernel_size=(kernel_size[0], 1), stride=(stride[0], 1), padding=(padding[0], 0))
         # self.norm1 = nn.BatchNorm2d(num_features=out_channels[0])
-        self.norm1 = L2_Norm()
+        self.norm1 = nn.InstanceNorm2d(out_channels[0])
 
         self.conv2 = nn.Conv2d(in_channels=in_channels[1], out_channels=out_channels[1],
                                kernel_size=(kernel_size[1], 1), stride=(stride[1], 1), padding=(padding[1], 0))
         # self.norm2 = nn.BatchNorm2d(num_features=out_channels[1])
-        self.norm2 = L2_Norm()
+        self.norm2 = nn.InstanceNorm2d(out_channels[1])
 
 
     def forward(self, x):
         x = self.conv1(x)
-        #x = self.norm1(x)
+        x = self.norm1(x)
         x = self.conv2(x)
-        #x = self.norm2(x)
+        x = self.norm2(x)
 
         return x
 
@@ -75,13 +75,15 @@ class Time_Conv(nn.Module):
         self.conv1 = nn.Conv2d(in_channels=config.MODEL.MODALITY_NUM, out_channels=out_channels[0],
                                kernel_size=(kernel_size[0], 1), stride=(stride[0], 1), padding=(padding[0], 0))
         # self.norm1 = nn.BatchNorm2d(num_features=out_channels[0])
-        self.norm1 = L2_Norm()
+        # self.norm1 = L2_Norm()
+        self.norm1 = nn.InstanceNorm2d(out_channels[0])
 
         # 64 -> 32
         self.conv2 = nn.Conv2d(in_channels=in_channels[1], out_channels=out_channels[1],
                                kernel_size=(kernel_size[1], 1), stride=(stride[1], 1), padding=(padding[1], 0))
         # self.norm2 = nn.BatchNorm2d(num_features=out_channels[1])
-        self.norm2 = L2_Norm()
+        # self.norm2 = L2_Norm()
+        self.norm2 = nn.InstanceNorm2d(out_channels[1])
 
         # 32 -> 16
         self.relu1 = nn.ReLU()
@@ -99,14 +101,15 @@ class Time_Conv(nn.Module):
 
     def forward(self, x):
         x = self.conv1(x)
-        #x = self.norm1(x)
+        x = self.norm1(x)
         x = self.conv2(x)
-        #x = self.norm2(x)
+        x = self.norm2(x)
         x = self.relu1(x)
         x = self.maxpooling1(x)
         x = self.layer1(x)
         x = self.relu2(x)
         x = self.maxpooling2(x)
+        #x = self.dropout(x)
         x = self.final_layer(x)
 
         return x
