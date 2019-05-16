@@ -32,6 +32,12 @@ class Loss(nn.Module):
 
         return clf_loss
 
+    def focal_loss(self, score, y):
+        score = torch.exp(score)
+        score = score / score.sum(dim=1, keepdim=True)
+        batch_size = score.shape[0]
+        return ((1 - score[range(batch_size), y]).pow(2) * (-torch.log(score[range(batch_size), y]))).mean()
+
     def rl_loss(self, rewards, q_pred, v_pred, target_v_pred_next, log_pi, q_new_actions):
 
         # q-value loss

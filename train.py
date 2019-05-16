@@ -2,10 +2,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import argparse
 import os
 import pprint
-import shutil
 
 import torch
 import torch.nn.parallel
@@ -46,8 +44,8 @@ def main():
 
     # create a model
     os.environ["CUDA_VISIBLE_DEVICES"] = config.GPUS
-    # gpus = [int(i) for i in config.GPUS.split(',')]
-    gpus = range(config.GPU_NUM)
+    gpus = [int(i) for i in config.GPUS.split(',')]
+    gpus = range(gpus.__len__())
     model = create_model(config, is_train=True)
 
     if config.TRAIN.RESUME:
@@ -62,11 +60,6 @@ def main():
         gpus = [int(i) for i in config.TRAIN_CLF.GPU.split(',')]
         os.environ["CUDA_VISIBLE_DEVICES"] = config.TRAIN_CLF.GPU
         model = model.cuda()
-
-    # # whether to train backbones
-    # if not config.TRAIN.IF_TRAIN_BACKBONE:
-    #     for param in model.backbones.parameters():
-    #         param.requires_grad = False
 
     #create a Loss class
     criterion = Loss(config).cuda()
@@ -84,32 +77,13 @@ def main():
     replay_buffer = create_replay_buffer()
 
     # load data
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-
-    transform = transforms.Compose([
-        transforms.Resize((config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W)),
-        transforms.ToTensor(),
-        normalize,
-    ])
-
-    normalize_gray = transforms.Normalize(mean=[0.456], std=[0.224])
-
-    transform_gray = transforms.Compose([
-        transforms.Resize((config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W)),
-        transforms.ToTensor(),
-        normalize_gray,
-    ])
-
     train_dataset = get_dataset(
         config,
         if_train=True,
-        transform=transform
     )
     valid_dataset = get_dataset(
         config,
         if_train=False,
-        transform=transform
     )
 
     train_loader = torch.utils.data.DataLoader(
@@ -134,17 +108,18 @@ def main():
         lr_scheduler.step()
 
         # train for one epoch
-        train(config, train_loader, model, criterion, optimizer, epoch, replay_buffer, transform, transform_gray)
+        train(config, train_loader, model, criterion, optimizer, epoch, replay_buffer)
 
         # evaluate on validation set
         if (epoch + 1) % config.TEST.TEST_EVERY == 0:
-            perf_indicator = validate(config, valid_loader, model, criterion, epoch, transform, transform_gray)
+            perf_indicator = validate(config, valid_loader, model, criterion, epoch)
 
             if perf_indicator > best_perf:
                 logger.info("=> saving checkpoint into {}".format(os.path.join(config.OUTPUT_DIR, 'checkpoint_{}.pth'.format(perf_indicator))))
                 best_perf = perf_indicator
                 torch.save(model.state_dict(), os.path.join(config.OUTPUT_DIR, 'checkpoint_{}.pth'.format(perf_indicator)))
 
+    # save the final model
     logger.info("=> saving final model into {}".format(
         os.path.join(config.OUTPUT_DIR, 'model_{}.pth'.format(perf_indicator))
     ))

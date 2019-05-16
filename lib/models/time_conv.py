@@ -22,6 +22,7 @@ stride = [2, 2]
 padding = [3, 3]
 
 
+
 def flatten(x):
     N = x.shape[0]
     return x.view(N, -1)
@@ -39,7 +40,7 @@ class L2_Norm(nn.Module):
 
     def forward(self, x):
         print(x.norm(dim=(2, 3)).mean())
-        return x / x.norm(dim=(2, 3), keepdim=True)
+        return x / (x.norm(dim=(3), keepdim=True) + 1e-5)
 
 # input.shape = [batch_size, channel_num, temporal_len, feature_dim]
 
@@ -51,11 +52,15 @@ class Basic_Block(nn.Module):
                                kernel_size=(kernel_size[0], 1), stride=(stride[0], 1), padding=(padding[0], 0))
         # self.norm1 = nn.BatchNorm2d(num_features=out_channels[0])
         self.norm1 = nn.InstanceNorm2d(out_channels[0])
+        # self.norm1 = L2_Norm()
+        # self.norm1 = nn.Sequential(nn.InstanceNorm2d(out_channels[0]), L2_Norm())
 
         self.conv2 = nn.Conv2d(in_channels=in_channels[1], out_channels=out_channels[1],
                                kernel_size=(kernel_size[1], 1), stride=(stride[1], 1), padding=(padding[1], 0))
         # self.norm2 = nn.BatchNorm2d(num_features=out_channels[1])
         self.norm2 = nn.InstanceNorm2d(out_channels[1])
+        # self.norm2 = L2_Norm()
+        # self.norm2 = nn.Sequential(nn.InstanceNorm2d(out_channels[0]), L2_Norm())
 
 
     def forward(self, x):
@@ -77,6 +82,7 @@ class Time_Conv(nn.Module):
         # self.norm1 = nn.BatchNorm2d(num_features=out_channels[0])
         # self.norm1 = L2_Norm()
         self.norm1 = nn.InstanceNorm2d(out_channels[0])
+        # self.norm1 = nn.Sequential(nn.InstanceNorm2d(out_channels[0]), L2_Norm())
 
         # 64 -> 32
         self.conv2 = nn.Conv2d(in_channels=in_channels[1], out_channels=out_channels[1],
@@ -84,6 +90,7 @@ class Time_Conv(nn.Module):
         # self.norm2 = nn.BatchNorm2d(num_features=out_channels[1])
         # self.norm2 = L2_Norm()
         self.norm2 = nn.InstanceNorm2d(out_channels[1])
+        # self.norm2 = nn.Sequential(nn.InstanceNorm2d(out_channels[0]), L2_Norm())
 
         # 32 -> 16
         self.relu1 = nn.ReLU()
@@ -109,7 +116,6 @@ class Time_Conv(nn.Module):
         x = self.layer1(x)
         x = self.relu2(x)
         x = self.maxpooling2(x)
-        #x = self.dropout(x)
         x = self.final_layer(x)
 
         return x

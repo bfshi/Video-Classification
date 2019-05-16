@@ -26,6 +26,7 @@ from models.model import create_model
 from utils.utils import create_optimizer
 from utils.utils import create_logger
 from utils.replay_buffer import create_replay_buffer
+from utils.utils import get_cycle_lr
 
 
 def main():
@@ -125,13 +126,20 @@ def main():
     for epoch in range(config.TRAIN.BEGIN_EPOCH, config.TRAIN.END_EPOCH):
         lr_scheduler.step()
 
+        # if using cycle_lr
+        if config.TRAIN_CLF.CYCLE_LR.IF_CYCLE_LR:
+            config.TRAIN.LR = get_cycle_lr(epoch, config.TRAIN_CLF.CYCLE_LR.STEPSIZE,
+                                           config.TRAIN_CLF.CYCLE_LR.MIN_LR,
+                                           config.TRAIN_CLF.CYCLE_LR.MAX_LR)
+            optimizer = create_optimizer(config, model)
+
         # train for one epoch
         train_clf(config, train_loader, model, criterion, optimizer, epoch, transform, transform_gray)
 
         # evaluate on validation set
         if (epoch + 1) % config.TEST.TEST_EVERY == 0:
             perf_indicator = validate_clf(config, valid_loader, model, criterion, epoch,
-                                          transform, transform_gray, sample_num_upper_bound=5)
+                                          transform, transform_gray)
 
             if perf_indicator > best_perf:
                 logger.info("=> saving checkpoint into {}".format(os.path.join(config.OUTPUT_DIR, 'checkpoint.pth')))

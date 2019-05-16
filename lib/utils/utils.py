@@ -217,27 +217,41 @@ def rollout(vedio, model, action, value):
     with torch.no_grad():
         return None
 
-def compute_reward(clf_score_new, clf_score, target, cost = None):
+def compute_reward(clf_score_new, clf_score, target, cost_old = None, cost = None):
     """
     compute reward according to classification score
     :param clf_score: NOT softmaxed!!!
     :param cost: aggregated cost (must below limit, otherwise reward is 0)
     :return: reward
     """
+    # batch_size = clf_score.shape[0]
+    #
+    # top2, indices = torch.topk(clf_score, k=2, dim=1)
+    # gap = (clf_score[range(batch_size), target] - top2[:, 0]) * (indices[:, 0] != target).type(torch.float) + \
+    #       (clf_score[range(batch_size), target] - top2[:, 1]) * (indices[:, 0] == target).type(torch.float)
+    #
+    # top2, indices = torch.topk(clf_score_new, k=2, dim=1)
+    # gap_new = (clf_score_new[range(batch_size), target] - top2[:, 0]) * (indices[:, 0] != target).type(torch.float) + \
+    #       (clf_score_new[range(batch_size), target] - top2[:, 1]) * (indices[:, 0] == target).type(torch.float)
+    #
+    # if cost is not None:
+    #     return (gap_new - gap) * (cost <= config.MODEL.COST_LIMIT).type(torch.float)
+    # else:
+    #     return gap_new - gap
+
     batch_size = clf_score.shape[0]
 
-    top2, indices = torch.topk(clf_score, k=2, dim=1)
-    gap = (clf_score[range(batch_size), target] - top2[:, 0]) * (indices[:, 0] != target).type(torch.float) + \
-          (clf_score[range(batch_size), target] - top2[:, 1]) * (indices[:, 0] == target).type(torch.float)
-
-    top2, indices = torch.topk(clf_score_new, k=2, dim=1)
-    gap_new = (clf_score_new[range(batch_size), target] - top2[:, 0]) * (indices[:, 0] != target).type(torch.float) + \
-          (clf_score_new[range(batch_size), target] - top2[:, 1]) * (indices[:, 0] == target).type(torch.float)
+    delta_prob = torch.nn.functional.softmax(clf_score_new, dim=1) -\
+                 torch.nn.functional.softmax(clf_score, dim=1)
+    reward = delta_prob[range(batch_size), target] * config.TRAIN.LAMBDA - (cost - cost_old)
 
     if cost is not None:
-        return (gap_new - gap) * (cost <= config.MODEL.COST_LIMIT).type(torch.float)
+        return reward * (cost <= config.MODEL.COST_LIMIT).type(torch.float)
     else:
-        return gap_new - gap
+        return reward
+
+
+
 
 
 def soft_update_from_to(source, target, tau):
@@ -252,6 +266,18 @@ def soft_update_from_to(source, target, tau):
         target_param.data.copy_(
             target_param.data * (1.0 - tau) + param.data * tau
         )
+
+
+def get_cycle_lr(epoch, stepsize, base_lr, max_lr):
+    """
+    Given the inputs, calculates the lr that should be
+    applicable for this epoch
+    """
+    cycle = np.floor(1 + epoch/(2 * stepsize))
+    x = np.abs(epoch/stepsize - 2 * cycle + 1)
+    lr = base_lr + (max_lr - base_lr) * np.maximum(0, (1-x))
+    return lr
+
 
 
 def compute_acc(score, target):

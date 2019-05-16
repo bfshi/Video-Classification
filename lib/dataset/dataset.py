@@ -107,14 +107,18 @@ class ActivityNet_I3D(VideoSet):
                         continue
                     line['video'] = line['video'][2:]
 
-                    rgb_list = glob.glob(os.path.join(self.config.TRAIN.DATAROOT,
-                                                      self.config.TRAIN.DATASET,
-                                                      'tsn_i3d_rgb_skip_8',
-                                                      line['video'] + '*.npy'))
+                    # rgb_list = glob.glob(os.path.join(self.config.TRAIN.DATAROOT,
+                    #                                   self.config.TRAIN.DATASET,
+                    #                                   'tsn_i3d_rgb_skip_8',
+                    #                                   line['video'] + '*.npy'))
                     flow_list = glob.glob(os.path.join(self.config.TRAIN.DATAROOT,
                                                        self.config.TRAIN.DATASET,
                                                        'tsn_i3d_flow_skip_8',
                                                        line['video'] + '.npy'))
+                    rgb_list = glob.glob(os.path.join(self.config.TRAIN.DATAROOT,
+                                                      self.config.TRAIN.DATASET,
+                                                      'resnet101_i3d_rgb_skip_8',
+                                                      line['video'] + '*.npy'))
                     # can't find
                     if (rgb_list.__len__() == 0 or flow_list.__len__() == 0):
                         continue
@@ -126,6 +130,9 @@ class ActivityNet_I3D(VideoSet):
                             or rgb_feature.shape[0] == 0 or flow_feature.shape[0] == 0 \
                             or rgb_feature.shape[0] != flow_feature.shape[0]:
                         continue
+                    # if not rgb_feature.any() \
+                    #             or rgb_feature.shape[0] == 0:
+                    #     continue
                     else:
                         cnt += 1
                         print(cnt)
@@ -155,11 +162,13 @@ class ActivityNet_I3D(VideoSet):
         meta['label'] = item_info['label']
         meta['name'] = item_info['name']
 
-        sample = torch.FloatTensor(range(self.config.MODEL.FRAMEDIV_NUM)) / self.config.MODEL.FRAMEDIV_NUM
+        sample = torch.FloatTensor(range(self.config.MODEL.FRAMEDIV_NUM)) / self.config.MODEL.FRAMEDIV_NUM + \
+                 torch.rand(self.config.MODEL.FRAMEDIV_NUM) / (self.config.MODEL.FRAMEDIV_NUM + 1)
         sample = (sample * meta['framenum']).type(torch.long)
 
         return torch.stack([self.rgb_feature_list[idx][sample, :],
-                            self.flow_feature_list[idx][sample, :],
+                            torch.cat((self.flow_feature_list[idx][sample, :],
+                                       self.flow_feature_list[idx][sample, :]), dim=1),
                             ]), \
                label_idx, meta
 
