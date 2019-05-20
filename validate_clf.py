@@ -68,27 +68,10 @@ def main():
     criterion = Loss(config).cuda()
 
     # load data
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-
-    transform = transforms.Compose([
-            transforms.Resize((config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W)),
-            transforms.ToTensor(),
-            normalize,
-        ])
-
-    normalize_gray = transforms.Normalize(mean=[0.456], std=[0.224])
-
-    transform_gray = transforms.Compose([
-        transforms.Resize((config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W)),
-        transforms.ToTensor(),
-        normalize_gray,
-    ])
 
     valid_dataset = get_dataset(
         config,
         if_train = False,
-        transform = transform
     )
 
     valid_loader = torch.utils.data.DataLoader(
@@ -107,7 +90,7 @@ def main():
     output_dict['external_data'] = {"used": False, "details": "No details."}
 
     # training and validating
-    perf_indicator = validate_clf(config, valid_loader, model, criterion, 0, transform, transform_gray,
+    perf_indicator = validate_clf(config, valid_loader, model, criterion, 0,
                                   output_dict, valid_dataset)
 
     logger.info("=> saving final model into {}".format(

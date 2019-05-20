@@ -76,32 +76,13 @@ def main():
     )
 
     # load data
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-
-    transform = transforms.Compose([
-            transforms.Resize((config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W)),
-            transforms.ToTensor(),
-            normalize,
-        ])
-
-    normalize_gray = transforms.Normalize(mean=[0.456], std=[0.224])
-
-    transform_gray = transforms.Compose([
-        transforms.Resize((config.MODEL.BACKBONE_INDIM_H, config.MODEL.BACKBONE_INDIM_W)),
-        transforms.ToTensor(),
-        normalize_gray,
-    ])
-
     train_dataset = get_dataset(
         config,
         if_train = True,
-        transform = transform
     )
     valid_dataset = get_dataset(
         config,
         if_train = False,
-        transform = transform
     )
 
     train_loader = torch.utils.data.DataLoader(
@@ -134,17 +115,16 @@ def main():
             optimizer = create_optimizer(config, model)
 
         # train for one epoch
-        train_clf(config, train_loader, model, criterion, optimizer, epoch, transform, transform_gray)
+        train_clf(config, train_loader, model, criterion, optimizer, epoch)
 
         # evaluate on validation set
         if (epoch + 1) % config.TEST.TEST_EVERY == 0:
-            perf_indicator = validate_clf(config, valid_loader, model, criterion, epoch,
-                                          transform, transform_gray)
+            perf_indicator = validate_clf(config, valid_loader, model, criterion, epoch)
 
             if perf_indicator > best_perf:
-                logger.info("=> saving checkpoint into {}".format(os.path.join(config.OUTPUT_DIR, 'checkpoint.pth')))
+                logger.info("=> saving checkpoint into {}".format(os.path.join(config.OUTPUT_DIR, 'checkpoint_{}.pth'.format(perf_indicator))))
                 best_perf = perf_indicator
-                torch.save(model.state_dict(), os.path.join(config.OUTPUT_DIR, 'checkpoint.pth'))
+                torch.save(model.state_dict(), os.path.join(config.OUTPUT_DIR, 'checkpoint_{}.pth'.format(perf_indicator)))
 
     logger.info("=> saving final model into {}".format(
         os.path.join(config.OUTPUT_DIR, 'model_clf_{acc_avg}.pth'.format(acc_avg=perf_indicator))

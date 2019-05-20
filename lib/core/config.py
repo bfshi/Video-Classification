@@ -57,7 +57,7 @@ config.MODEL.FEATURE_DIM = 2048  # for pre-extracted feature
 config.MODEL.COST_DIM = 1
 config.MODEL.CLFDIM = 200
 config.MODEL.FRAMEDIV_NUM = 128  # output dimension of act_head_frame
-config.MODEL.MODALITY_NUM = 2
+config.MODEL.MODALITY_NUM = 3
 
 config.MODEL.COST_LIST = []
 
@@ -65,7 +65,7 @@ config.MODEL.COST_LIST = []
 
 config.TRAIN = edict()
 
-config.TRAIN.RESUME = True  # whether to continue previous training
+config.TRAIN.RESUME = False  # whether to continue previous training
 config.TRAIN.STATE_DICT = 'train_clf/random_128_rgb_flow_resnet101_model_clf_2019-05-12-10-51_mAP@5_0.645_mAP@128_0.841.pth'
 
 config.TRAIN.SINGLE_GPU = False
@@ -113,7 +113,7 @@ config.TRAIN_CLF = edict()
 
 config.TRAIN_CLF.RANDOM_SAMPLE_NUM = True  # is number of sampled frames a random number?
 config.TRAIN_CLF.SAMPLE_NUM_BOUND = 128    # upper bound of number of sampled frames
-config.TRAIN_CLF.SAMPLE_NUM = 10           # if number of sampled frames is fixed
+config.TRAIN_CLF.SAMPLE_NUM = 5           # if number of sampled frames is fixed
 
 config.TRAIN_CLF.SINGLE_GPU = False
 config.TRAIN_CLF.GPU = '1'  # which to use when SINGLE_GPU == True
@@ -131,7 +131,7 @@ config.TRAIN_CLF.CYCLE_LR.MAX_LR = 1e-2
 config.TEST = edict()
 
 config.TEST.RESUME = True
-config.TEST.STATE_DICT = 'train_clf/random_128_rgb_flow_resnet101_model_clf_2019-05-12-10-51_mAP@5_0.645_mAP@128_0.841.pth'
+config.TEST.STATE_DICT = 'train_clf/random_128_3modality_model_clf_2019-05-19-13-05_0.754.pth'
 
 config.TEST.BATCH_SIZE = 32
 

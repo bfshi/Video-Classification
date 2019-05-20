@@ -34,8 +34,9 @@ class VideoSet(Dataset):
         # name_list = ['name1', 'name2', ...]
         self.name_list = []
         # *_feature_list = [tensor1, tensor2, ...]
-        self.rgb_feature_list = []
-        self.flow_feature_list = []
+        self.i3d_rgb_feature_list = []
+        self.i3d_flow_feature_list = []
+        self.resnet_rgb_feature_list = []
 
     def load_dataset(self):
         # implemented in child class
@@ -107,28 +108,32 @@ class ActivityNet_I3D(VideoSet):
                         continue
                     line['video'] = line['video'][2:]
 
-                    # rgb_list = glob.glob(os.path.join(self.config.TRAIN.DATAROOT,
-                    #                                   self.config.TRAIN.DATASET,
-                    #                                   'tsn_i3d_rgb_skip_8',
-                    #                                   line['video'] + '*.npy'))
-                    flow_list = glob.glob(os.path.join(self.config.TRAIN.DATAROOT,
+                    i3d_rgb_list = glob.glob(os.path.join(self.config.TRAIN.DATAROOT,
+                                                      self.config.TRAIN.DATASET,
+                                                      'tsn_i3d_rgb_skip_8',
+                                                      line['video'] + '*.npy'))
+                    i3d_flow_list = glob.glob(os.path.join(self.config.TRAIN.DATAROOT,
                                                        self.config.TRAIN.DATASET,
                                                        'tsn_i3d_flow_skip_8',
                                                        line['video'] + '.npy'))
-                    rgb_list = glob.glob(os.path.join(self.config.TRAIN.DATAROOT,
+                    resnet_rgb_list = glob.glob(os.path.join(self.config.TRAIN.DATAROOT,
                                                       self.config.TRAIN.DATASET,
                                                       'resnet101_i3d_rgb_skip_8',
                                                       line['video'] + '*.npy'))
                     # can't find
-                    if (rgb_list.__len__() == 0 or flow_list.__len__() == 0):
+                    if (i3d_rgb_list.__len__() == 0
+                            or i3d_flow_list.__len__() == 0
+                            or resnet_rgb_list.__len__() == 0):
                         continue
-                    rgb_feature = np.load(rgb_list[0])
-                    flow_feature = np.load(flow_list[0])
+                    i3d_rgb_feature = np.load(i3d_rgb_list[0])
+                    i3d_flow_feature = np.load(i3d_flow_list[0])
+                    resnet_rgb_feature = np.load(resnet_rgb_list[0])
 
                     # incomplete videos
-                    if not rgb_feature.any() or not flow_feature.any() \
-                            or rgb_feature.shape[0] == 0 or flow_feature.shape[0] == 0 \
-                            or rgb_feature.shape[0] != flow_feature.shape[0]:
+                    if not i3d_rgb_feature.any() or not i3d_flow_feature.any() or not resnet_rgb_feature.any() \
+                            or i3d_rgb_feature.shape[0] == 0 or i3d_flow_feature.shape[0] == 0 or resnet_rgb_feature.shape[0] == 0 \
+                            or i3d_rgb_feature.shape[0] != i3d_flow_feature.shape[0] \
+                            or i3d_rgb_feature.shape[0] != resnet_rgb_feature.shape[0]:
                         continue
                     # if not rgb_feature.any() \
                     #             or rgb_feature.shape[0] == 0:
@@ -140,9 +145,10 @@ class ActivityNet_I3D(VideoSet):
                         #     break
 
 
-                        self.rgb_feature_list.append(torch.FloatTensor(rgb_feature))
-                        self.flow_feature_list.append(torch.FloatTensor(flow_feature))
-                        video_info_dict[line['video']]['metadata']['framenum'] = rgb_feature.shape[0]
+                        self.i3d_rgb_feature_list.append(torch.FloatTensor(i3d_rgb_feature))
+                        self.i3d_flow_feature_list.append(torch.FloatTensor(i3d_flow_feature))
+                        self.resnet_rgb_feature_list.append(torch.FloatTensor(resnet_rgb_feature))
+                        video_info_dict[line['video']]['metadata']['framenum'] = i3d_rgb_feature.shape[0]
                         self.video_info.append(video_info_dict[line['video']])
                         self.name_list.append(line['video'])
 
@@ -166,9 +172,16 @@ class ActivityNet_I3D(VideoSet):
                  torch.rand(self.config.MODEL.FRAMEDIV_NUM) / (self.config.MODEL.FRAMEDIV_NUM + 1)
         sample = (sample * meta['framenum']).type(torch.long)
 
-        return torch.stack([self.rgb_feature_list[idx][sample, :],
-                            torch.cat((self.flow_feature_list[idx][sample, :],
-                                       self.flow_feature_list[idx][sample, :]), dim=1),
+        # return torch.stack([self.i3d_rgb_feature_list[idx][sample, :],
+        #                     self.i3d_flow_feature_list[idx][sample, :],
+        #                     ]), \
+        #        label_idx, meta
+
+        return torch.stack([torch.cat((self.i3d_rgb_feature_list[idx][sample, :],
+                                       self.i3d_rgb_feature_list[idx][sample, :]), dim=1),
+                            torch.cat((self.i3d_flow_feature_list[idx][sample, :],
+                                       self.i3d_flow_feature_list[idx][sample, :]), dim=1),
+                            self.resnet_rgb_feature_list[idx][sample, :],
                             ]), \
                label_idx, meta
 

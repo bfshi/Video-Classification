@@ -38,11 +38,13 @@ class VedioClfNet(nn.Module):
         super(VedioClfNet, self).__init__()
 
         self.config = config
-        self.time_conv = get_time_conv()
+        self.time_conv = torch.nn.ModuleList([get_time_conv() for i in range(config.MODEL.MODALITY_NUM)])
+        # self.time_conv = get_time_conv()
 
         # output frame selection probability
         self.act_head_frame = nn.Sequential(
-            nn.Linear(config.MODEL.FEATURE_DIM + config.MODEL.COST_DIM, config.MODEL.FEATURE_DIM),
+            nn.Linear(config.MODEL.FEATURE_DIM * config.MODEL.MODALITY_NUM + config.MODEL.COST_DIM,
+                      config.MODEL.FEATURE_DIM),
             nn.ReLU(),
             nn.Linear(config.MODEL.FEATURE_DIM, config.MODEL.FRAMEDIV_NUM),
             nn.Softmax(dim=1),
@@ -50,7 +52,8 @@ class VedioClfNet(nn.Module):
 
         # output modality selection probability
         self.act_head_modality = nn.Sequential(
-            nn.Linear(config.MODEL.FEATURE_DIM + config.MODEL.COST_DIM, config.MODEL.FEATURE_DIM),
+            nn.Linear(config.MODEL.FEATURE_DIM * config.MODEL.MODALITY_NUM + config.MODEL.COST_DIM,
+                      config.MODEL.FEATURE_DIM),
             nn.ReLU(),
             nn.Linear(config.MODEL.FEATURE_DIM, config.MODEL.MODALITY_NUM),
             nn.Softmax(dim=1)
@@ -61,31 +64,51 @@ class VedioClfNet(nn.Module):
 
         # output soft state value
         self.v_head = nn.Sequential(
-            nn.Linear(config.MODEL.FEATURE_DIM + config.MODEL.COST_DIM, config.MODEL.FEATURE_DIM),
+            nn.Linear(config.MODEL.FEATURE_DIM * config.MODEL.MODALITY_NUM + config.MODEL.COST_DIM,
+                      config.MODEL.FEATURE_DIM),
             nn.ReLU(),
             nn.Linear(config.MODEL.FEATURE_DIM, 1)
         )
 
         # target v_head and synchronize params
         self.target_v_head = nn.Sequential(
-            nn.Linear(config.MODEL.FEATURE_DIM + config.MODEL.COST_DIM, config.MODEL.FEATURE_DIM),
+            nn.Linear(config.MODEL.FEATURE_DIM * config.MODEL.MODALITY_NUM + config.MODEL.COST_DIM,
+                      config.MODEL.FEATURE_DIM),
             nn.ReLU(),
             nn.Linear(config.MODEL.FEATURE_DIM, 1)
         )
         soft_update_from_to(self.v_head, self.target_v_head, 1)
 
         # output soft state-action value
-        self.q_head = Q_head(config.MODEL.FEATURE_DIM + config.MODEL.COST_DIM,
+        self.q_head = Q_head(config.MODEL.FEATURE_DIM * config.MODEL.MODALITY_NUM + config.MODEL.COST_DIM,
                              config.MODEL.FRAMEDIV_NUM, config.MODEL.MODALITY_NUM)
 
-    def forward(self, x):
+    def forward(self, x, if_fusion = False):
         """
         :param x: N * C * T * W
+        :param if_fusion: if to merge clf_scores of different modalities
         """
-        y = self.time_conv(x)
-        clf_score = self.clf_head(y)
+        clf_score_list = []
+        for i in range(self.config.MODEL.MODALITY_NUM):
+            if i == 0:
+                y = self.time_conv[i](x[:, i: i + 1])
+                clf_score_list.append(self.clf_head(y))
+            else:
+                temp = self.time_conv[i](x[:, i: i + 1])
+                y = torch.cat((y, temp), dim=1)
+                clf_score_list.append(self.clf_head(temp))
 
-        return clf_score, y
+        if if_fusion:
+            clf_score = clf_score_list[0]
+            for i in range(1, self.config.MODEL.MODALITY_NUM):
+                clf_score += clf_score_list[i]
+            return clf_score, y
+        else:
+            return clf_score_list, y
+        # y = self.time_conv(x)
+        # clf_score = self.clf_head(y)
+        # return clf_score, y
+
 
     def policy(self, y, cost_his, choice_his, if_val = False, if_random = False):
         """

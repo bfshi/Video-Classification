@@ -77,7 +77,7 @@ class Time_Conv(nn.Module):
         super(Time_Conv, self).__init__()
 
         # 128 -> 64
-        self.conv1 = nn.Conv2d(in_channels=config.MODEL.MODALITY_NUM, out_channels=out_channels[0],
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=out_channels[0],
                                kernel_size=(kernel_size[0], 1), stride=(stride[0], 1), padding=(padding[0], 0))
         # self.norm1 = nn.BatchNorm2d(num_features=out_channels[0])
         # self.norm1 = L2_Norm()

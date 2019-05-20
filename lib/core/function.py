@@ -87,7 +87,7 @@ def train(config, train_loader, model, criterion, optimizer, epoch, replay_buffe
                 input[range(total_batch_size), new_act_modality, new_act_frame, :] = video_feature[range(total_batch_size), new_act_modality, new_act_frame, :]
 
                 # compute output
-                clf_score_new, ob_new = model(input.cuda())
+                clf_score_new, ob_new = model(input.cuda(), if_fusion=True)
 
                 # compute new cost
                 for j in range(config.MODEL.MODALITY_NUM):
@@ -245,7 +245,7 @@ def validate(config, val_loader, model, criterion, epoch, output_dict=None, vali
                 input[range(total_batch_size), new_act_modality, new_act_frame, :] = video_feature[range(total_batch_size), new_act_modality, new_act_frame, :]
 
                 # compute output
-                clf_score_new, ob_new = model(input.cuda())
+                clf_score_new, ob_new = model(input.cuda(), if_fusion=True)
 
                 # compute new cost
                 for j in range(config.MODEL.MODALITY_NUM):
@@ -349,15 +349,22 @@ def train_clf(config, train_loader, model, criterion, optimizer, epoch, transfor
 
         # compute the output
 
-        clf_score, _ = model(input.cuda())
+        clf_score_list, _ = model(input.cuda(), if_fusion = False)
+
+        for j in range(config.MODEL.MODALITY_NUM):
+            if j == 0:
+                clf_score = clf_score_list[0]
+                loss = criterion.focal_loss(clf_score_list[0], target)
+            else:
+                clf_score += clf_score_list[j]
+                loss += criterion.focal_loss(clf_score_list[j], target)
 
         # update acc
         avg_acc = compute_acc(clf_score, target)
         acc.update(avg_acc, total_batch_size)
 
-        # compute loss
-        # loss = criterion.clf_loss(clf_score, target)
-        loss = criterion.focal_loss(clf_score, target)
+        # # compute loss
+        # loss = criterion.focal_loss(clf_score, target)
 
         # back prop
         optimizer.zero_grad()
@@ -385,7 +392,7 @@ def train_clf(config, train_loader, model, criterion, optimizer, epoch, transfor
             logger.info(msg)
 
 
-def validate_clf(config, val_loader, model, criterion, epoch = 0, transform = None, transform_gray = None,
+def validate_clf(config, val_loader, model, criterion, epoch = 0,
                  output_dict = None, valid_dataset = None):
     """
     validate backbone, lstm and clf_head only.
@@ -425,7 +432,7 @@ def validate_clf(config, val_loader, model, criterion, epoch = 0, transform = No
             frame_chosen = torch.multinomial(
                 input=torch.ones((config.MODEL.FRAMEDIV_NUM)) / config.MODEL.FRAMEDIV_NUM,
                 num_samples=config.TRAIN_CLF.SAMPLE_NUM)
-            # frame_chosen = (choose_frame_randomly(1, 10) * config.MODEL.FRAMEDIV_NUM).type(torch.long).view(-1)
+            # frame_chosen = (choose_frame_randomly(1, 5) * config.MODEL.FRAMEDIV_NUM).type(torch.long).view(-1)
             modality_chosen = torch.multinomial(
                 input=torch.ones((config.MODEL.MODALITY_NUM)) / config.MODEL.MODALITY_NUM,
                 num_samples=config.TRAIN_CLF.SAMPLE_NUM, replacement=True)
@@ -440,14 +447,22 @@ def validate_clf(config, val_loader, model, criterion, epoch = 0, transform = No
 
             # compute the output
 
-            clf_score, _ = model(input.cuda())
+            clf_score_list, _ = model(input.cuda(), if_fusion=False)
+
+            for j in range(config.MODEL.MODALITY_NUM):
+                if j == 0:
+                    clf_score = clf_score_list[0]
+                    loss = criterion.focal_loss(clf_score_list[0], target)
+                else:
+                    clf_score += clf_score_list[j]
+                    loss += criterion.focal_loss(clf_score_list[j], target)
 
             # update acc
             avg_acc = compute_acc(clf_score, target)
             acc.update(avg_acc, total_batch_size)
 
-            # compute loss
-            loss = criterion.clf_loss(clf_score, target)
+            # # compute loss
+            # loss = criterion.focal_loss(clf_score, target)
 
             # update total clf_loss
             clf_losses.update(loss.item(), total_batch_size)
