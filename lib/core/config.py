@@ -57,7 +57,7 @@ config.MODEL.FEATURE_DIM = 2048  # for pre-extracted feature
 config.MODEL.COST_DIM = 1
 config.MODEL.CLFDIM = 200
 config.MODEL.FRAMEDIV_NUM = 128  # output dimension of act_head_frame
-config.MODEL.MODALITY_NUM = 3
+config.MODEL.MODALITY_NUM = 1
 
 config.MODEL.COST_LIST = []
 
@@ -66,7 +66,7 @@ config.MODEL.COST_LIST = []
 config.TRAIN = edict()
 
 config.TRAIN.RESUME = False  # whether to continue previous training
-config.TRAIN.STATE_DICT = 'train_clf/random_128_rgb_flow_resnet101_model_clf_2019-05-12-10-51_mAP@5_0.645_mAP@128_0.841.pth'
+config.TRAIN.STATE_DICT = 'train_clf/random_128_rgb_resnet101_model_clf_2019-07-01-19-37_0.710_mAP@R5_0.663_mAP@U5_0.674_mAP@128_0.769.pth'
 
 config.TRAIN.SINGLE_GPU = False
 config.TRAIN.GPU = '1'  # which to use when SINGLE_GPU == True
@@ -98,7 +98,7 @@ config.TRAIN.TRAIN_RL_STEP = 3  # num of steps to train policy after each experi
 config.TRAIN.BEGIN_EPOCH = 0
 config.TRAIN.END_EPOCH = 120
 
-config.TRAIN.BATCH_SIZE = 16  # paralleled batch size per gpu
+config.TRAIN.BATCH_SIZE = 8  # paralleled batch size per gpu
 config.TRAIN.RL_BATCH_SIZE = 64
 config.TRAIN.SHUFFLE = True
 
@@ -113,12 +113,12 @@ config.TRAIN_CLF = edict()
 
 config.TRAIN_CLF.RANDOM_SAMPLE_NUM = True  # is number of sampled frames a random number?
 config.TRAIN_CLF.SAMPLE_NUM_BOUND = 128    # upper bound of number of sampled frames
-config.TRAIN_CLF.SAMPLE_NUM = 5           # if number of sampled frames is fixed
+config.TRAIN_CLF.SAMPLE_NUM = 5          # if number of sampled frames is fixed
 
 config.TRAIN_CLF.SINGLE_GPU = False
 config.TRAIN_CLF.GPU = '1'  # which to use when SINGLE_GPU == True
 
-# cycle learning rate
+# cyclic learning rate
 config.TRAIN_CLF.CYCLE_LR = edict()
 config.TRAIN_CLF.CYCLE_LR.IF_CYCLE_LR = False
 config.TRAIN_CLF.CYCLE_LR.STEPSIZE = 15  # half a period
@@ -126,18 +126,42 @@ config.TRAIN_CLF.CYCLE_LR.MIN_LR = 1e-3
 config.TRAIN_CLF.CYCLE_LR.MAX_LR = 1e-2
 
 
+# selective training
+
+config.TRAIN_SEL = edict()
+
+config.TRAIN_SEL.PRECHOOSING_NUM = 5
+config.TRAIN_SEL.MAX_CHOOSING_NUM = 15
+config.TRAIN_SEL.ACTION_SAMPLE_NUM = 10
+
+
 # testing related configs
 
 config.TEST = edict()
 
 config.TEST.RESUME = True
-config.TEST.STATE_DICT = 'train_clf/random_128_3modality_model_clf_2019-05-19-13-05_0.754.pth'
+config.TEST.STATE_DICT = 'train_clf/random_128_rgb_resnet101_model_clf_2019-07-01-19-37_0.710_mAP@R5_0.663_mAP@U5_0.674_mAP@128_0.769.pth'
 
 config.TEST.BATCH_SIZE = 32
 
 config.TEST.TEST_EVERY = 1  # frequency of testing during training
 
 config.TEST.PRINT_EVERY = 1
+
+# selective testing related configs
+
+config.TEST_SEL = edict()
+
+config.TEST_SEL.RESUME = True
+config.TEST_SEL.STATE_DICT = 'train_sel/sampling_based_rgb_resnet101_model_sel_2019-07-19-16-54_0.667.pth'
+
+# path to each part of network
+
+config.STATE_DICT = edict()
+
+config.STATE_DICT.F_C = 'train_clf/random_128_rgb_resnet101_model_clf_2019-07-01-19-37_0.710_mAP@R5_0.663_mAP@U5_0.674_mAP@128_0.769.pth'
+config.STATE_DICT.F_S = 'train_sel/sampling_based_rgb_resnet101_model_sel_2019-07-19-16-54_0.667.pth'
+config.STATE_DICT.F_K = ''
 
 
 # extra settings
@@ -150,6 +174,14 @@ def extra():
                                      'resnet{}'.format(config.MODEL.RESNET_TYPE), config.TRAIN.STATE_DICT)
     config.TEST.STATE_DICT = os.path.join('experiments/', config.TRAIN.DATASET,
                                            'resnet{}'.format(config.MODEL.RESNET_TYPE), config.TEST.STATE_DICT)
+    config.TEST_SEL.STATE_DICT = os.path.join('experiments/', config.TRAIN.DATASET,
+                                           'resnet{}'.format(config.MODEL.RESNET_TYPE), config.TEST_SEL.STATE_DICT)
+    config.STATE_DICT.F_C = os.path.join('experiments/', config.TRAIN.DATASET,
+                                           'resnet{}'.format(config.MODEL.RESNET_TYPE), config.STATE_DICT.F_C)
+    config.STATE_DICT.F_S = os.path.join('experiments/', config.TRAIN.DATASET,
+                                         'resnet{}'.format(config.MODEL.RESNET_TYPE), config.STATE_DICT.F_S)
+    config.STATE_DICT.F_K = os.path.join('experiments/', config.TRAIN.DATASET,
+                                         'resnet{}'.format(config.MODEL.RESNET_TYPE), config.STATE_DICT.F_K)
     if not config.TRAIN.SINGLE_GPU:
         config.TRAIN.RL_BATCH_SIZE = config.TRAIN.RL_BATCH_SIZE * config.GPU_NUM
 

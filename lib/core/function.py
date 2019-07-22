@@ -8,6 +8,9 @@ import os
 
 import numpy as np
 import torch
+import torch.nn.functional as F
+
+from math import log
 
 import _init_paths
 from core.config import config
@@ -349,22 +352,22 @@ def train_clf(config, train_loader, model, criterion, optimizer, epoch, transfor
 
         # compute the output
 
-        clf_score_list, _ = model(input.cuda(), if_fusion = False)
+        clf_score, _ = model(input, if_fusion = False)
 
-        for j in range(config.MODEL.MODALITY_NUM):
-            if j == 0:
-                clf_score = clf_score_list[0]
-                loss = criterion.focal_loss(clf_score_list[0], target)
-            else:
-                clf_score += clf_score_list[j]
-                loss += criterion.focal_loss(clf_score_list[j], target)
+        # for j in range(config.MODEL.MODALITY_NUM):
+        #     if j == 0:
+        #         clf_score = clf_score_list[0]
+        #         loss = criterion.focal_loss(clf_score_list[0], target)
+        #     else:
+        #         clf_score += clf_score_list[j]
+        #         loss += criterion.focal_loss(clf_score_list[j], target)
 
         # update acc
         avg_acc = compute_acc(clf_score, target)
         acc.update(avg_acc, total_batch_size)
 
-        # # compute loss
-        # loss = criterion.focal_loss(clf_score, target)
+        # compute loss
+        loss = criterion.focal_loss(clf_score, target)
 
         # back prop
         optimizer.zero_grad()
@@ -432,7 +435,8 @@ def validate_clf(config, val_loader, model, criterion, epoch = 0,
             frame_chosen = torch.multinomial(
                 input=torch.ones((config.MODEL.FRAMEDIV_NUM)) / config.MODEL.FRAMEDIV_NUM,
                 num_samples=config.TRAIN_CLF.SAMPLE_NUM)
-            # frame_chosen = (choose_frame_randomly(1, 5) * config.MODEL.FRAMEDIV_NUM).type(torch.long).view(-1)
+            # frame_chosen = ((torch.Tensor(range(config.TRAIN_CLF.SAMPLE_NUM)) + 0.5) / config.TRAIN_CLF.SAMPLE_NUM *
+            #                 config.MODEL.FRAMEDIV_NUM).type(torch.long)
             modality_chosen = torch.multinomial(
                 input=torch.ones((config.MODEL.MODALITY_NUM)) / config.MODEL.MODALITY_NUM,
                 num_samples=config.TRAIN_CLF.SAMPLE_NUM, replacement=True)
@@ -447,22 +451,385 @@ def validate_clf(config, val_loader, model, criterion, epoch = 0,
 
             # compute the output
 
-            clf_score_list, _ = model(input.cuda(), if_fusion=False)
+            clf_score, _ = model(input, if_fusion=False)
 
-            for j in range(config.MODEL.MODALITY_NUM):
-                if j == 0:
-                    clf_score = clf_score_list[0]
-                    loss = criterion.focal_loss(clf_score_list[0], target)
-                else:
-                    clf_score += clf_score_list[j]
-                    loss += criterion.focal_loss(clf_score_list[j], target)
+            # for j in range(config.MODEL.MODALITY_NUM):
+            #     if j == 0:
+            #         clf_score = clf_score_list[0]
+            #         loss = criterion.focal_loss(clf_score_list[0], target)
+            #     else:
+            #         clf_score += clf_score_list[j]
+            #         loss += criterion.focal_loss(clf_score_list[j], target)
 
             # update acc
             avg_acc = compute_acc(clf_score, target)
             acc.update(avg_acc, total_batch_size)
 
-            # # compute loss
-            # loss = criterion.focal_loss(clf_score, target)
+            # compute loss
+            loss = criterion.focal_loss(clf_score, target)
+
+            # update total clf_loss
+            clf_losses.update(loss.item(), total_batch_size)
+
+            # update time record
+            batch_time.update(time.time() - end)
+            end = time.time()
+
+            if i % config.TEST.PRINT_EVERY == 0:
+                msg = 'Test: [{0}/{1}]\t' \
+                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t' \
+                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t' \
+                      'Accuracy {acc.val:.3f} ({acc.avg:.3f})'.format(
+                    i, len(val_loader), batch_time=batch_time,
+                    loss=clf_losses, acc=acc)
+                logger.info(msg)
+
+            if if_output_result:
+                clf_score = torch.nn.functional.softmax(clf_score, dim=1).cpu().numpy()
+                for j in range(total_batch_size):
+                    temp = list(zip(list(zip(score_head, clf_score[j])),
+                                    list(zip(label_head, valid_dataset.label_list))))
+                    output_dict['results'][meta['name'][j]] = list(map(dict, temp))
+
+
+    return acc.avg
+
+
+
+def train_sel(config, train_loader, model, model_clf, criterion, optimizer, epoch):
+    """
+    train SelectiveNet.
+    data for training can be found in meta
+    """
+
+    # build recorders
+    batch_time = AverageMeter()
+    data_time = AverageMeter()
+    clf_losses = AverageMeter()
+    acc = AverageMeter()
+
+    # switch to train mode
+    model.train()
+
+    end = time.time()
+    for i, (video_feature, target, meta) in enumerate(train_loader):
+        # clear cache
+        # torch.cuda.empty_cache()
+
+        # measure data loading time
+        data_time.update(time.time() - end)
+
+        total_batch_size = target.shape[0]
+
+        # compute input
+        modality_chosen = meta['chosen_modality']
+        frame_chosen = meta['chosen_frame']
+        target = torch.LongTensor(meta['target_modality'] * config.MODEL.FRAMEDIV_NUM + meta['target_frame'])
+
+        input = torch.zeros((total_batch_size, config.MODEL.MODALITY_NUM,
+                             config.MODEL.FRAMEDIV_NUM, config.MODEL.FEATURE_DIM))
+        for j in range(total_batch_size):
+            input[j, modality_chosen[j], frame_chosen[j], :] = \
+                video_feature[j, modality_chosen[j], frame_chosen[j], :]
+
+        # compute the output
+
+        clf_score = model(input, if_fusion=False)
+
+        # update acc
+        target = target.cuda(async=True)
+        avg_acc = compute_acc(clf_score, target)
+        acc.update(avg_acc, total_batch_size)
+
+        # compute loss
+        loss = criterion.clf_loss(clf_score, target)
+
+        # back prop
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        # update total clf_loss
+        clf_losses.update(loss.item(), total_batch_size)
+
+        # update time record
+        batch_time.update(time.time() - end)
+        end = time.time()
+
+        # logging
+        if i % config.TRAIN.PRINT_EVERY == 0:
+            msg = 'Epoch: [{0}][{1}/{2}]\t' \
+                  'Time {batch_time.val:.3f}s ({batch_time.avg:.3f}s)\t' \
+                  'Speed {speed:.1f} samples/s\t' \
+                  'Data {data_time.val:.3f}s ({data_time.avg:.3f}s)\t' \
+                  'Loss {loss.val:.5f} ({loss.avg:.5f})\t' \
+                  'Accuracy {acc.val:.3f} ({acc.avg:.3f})'.format(
+                epoch, i, len(train_loader), batch_time=batch_time,
+                speed=total_batch_size / batch_time.val,
+                data_time=data_time, loss=clf_losses, acc=acc)
+            logger.info(msg)
+
+
+def train_sel_2(config, train_loader, model, model_clf, criterion, optimizer, epoch):
+    """
+    train SelectiveNet with sampling method.
+    using Importance Sampling to reduce variance.
+    """
+    # range of choosing num
+    prechoosing_num = config.TRAIN_SEL.PRECHOOSING_NUM
+    max_choosing_num = config.TRAIN_SEL.MAX_CHOOSING_NUM
+
+    # action sampling num
+    action_sample_num = config.TRAIN_SEL.ACTION_SAMPLE_NUM
+
+    # build recorders
+    batch_time = AverageMeter()
+    data_time = AverageMeter()
+    clf_losses = AverageMeter()
+
+    # switch to train mode
+    model.train()
+
+    end = time.time()
+    for i, (video_feature, target, meta) in enumerate(train_loader):
+
+        # measure data loading time
+        data_time.update(time.time() - end)
+
+        total_batch_size = target.shape[0]
+        target = target.cuda(async=True)
+
+        # pre-choosing
+        prechosen_frames = ((np.array(range(prechoosing_num)) + 0.5) / prechoosing_num *
+                            config.MODEL.FRAMEDIV_NUM).astype(np.int)
+        input = torch.zeros((total_batch_size, config.MODEL.MODALITY_NUM,
+                             config.MODEL.FRAMEDIV_NUM, config.MODEL.FEATURE_DIM))
+        # FIXME: In multi-modality setting, how to pre-choose frames?
+        input[:, 0, prechosen_frames, :] = video_feature[:, 0, prechosen_frames, :]
+
+        # random sample some frames as the chosen frames
+        sample_num = np.random.randint(max_choosing_num - prechoosing_num)
+        if sample_num != 0:
+            frame_chosen = torch.multinomial(
+                input=torch.ones((config.MODEL.FRAMEDIV_NUM)) / config.MODEL.FRAMEDIV_NUM,
+                num_samples=sample_num)
+            # frame_chosen = (choose_frame_randomly(1, 5) * config.MODEL.FRAMEDIV_NUM).type(torch.long).view(-1)
+            modality_chosen = torch.multinomial(
+                input=torch.ones((config.MODEL.MODALITY_NUM)) / config.MODEL.MODALITY_NUM,
+                num_samples=sample_num, replacement=True)
+            input[:, modality_chosen, frame_chosen, :] = video_feature[:, modality_chosen, frame_chosen, :]
+
+        # sample the target frame
+
+        choosing_prob = F.softmax(model(input), dim=1)
+        print(choosing_prob[0])
+        loss = torch.zeros((total_batch_size,)).cuda()
+
+        for j in range(action_sample_num):
+
+            # tmp = torch.multinomial(input=choosing_prob, num_samples=1).view(-1)
+            tmp = np.random.randint(0, config.MODEL.MODALITY_NUM * config.MODEL.FRAMEDIV_NUM, size=total_batch_size)
+            chosen_modality = tmp / config.MODEL.FRAMEDIV_NUM
+            chosen_frames = tmp % config.MODEL.FRAMEDIV_NUM
+
+            # update the input
+            input_temp = input.clone()
+            input_temp[range(total_batch_size), chosen_modality, chosen_frames, :] = \
+                video_feature[range(total_batch_size), chosen_modality, chosen_frames, :]
+
+            # compute the output
+            with torch.no_grad():
+                clf_score, _ = model_clf(input_temp.cuda(), if_fusion=False)
+
+            # compute clf_loss
+            clf_loss = (F.cross_entropy(clf_score, target, reduce=False, reduction='none'))
+
+            # update total clf_loss
+            clf_losses.update(clf_loss.mean(), total_batch_size)
+
+            # compute the loss which need to be BPed
+            loss = loss + clf_loss * choosing_prob[range(total_batch_size), tmp]
+
+        # back prop
+        loss = (loss / action_sample_num).mean()
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        # update time record
+        batch_time.update(time.time() - end)
+        end = time.time()
+
+        # logging
+        if i % config.TRAIN.PRINT_EVERY == 0:
+            msg = 'Epoch: [{0}][{1}/{2}]\t' \
+                  'Time {batch_time.val:.3f}s ({batch_time.avg:.3f}s)\t' \
+                  'Speed {speed:.1f} samples/s\t' \
+                  'Data {data_time.val:.3f}s ({data_time.avg:.3f}s)\t' \
+                  'Loss {loss.val:.5f} ({loss.avg:.5f})\t'.format(
+                epoch, i, len(train_loader), batch_time=batch_time,
+                speed=total_batch_size / batch_time.val,
+                data_time=data_time, loss=clf_losses)
+            logger.info(msg)
+
+
+
+
+def validate_sel(config, val_loader, model, model_clf, criterion, epoch = 0,
+                 output_dict = None, valid_dataset = None):
+
+    # range of choosing num
+    prechoosing_num = config.TRAIN_SEL.PRECHOOSING_NUM
+    max_choosing_num = config.TRAIN_SEL.MAX_CHOOSING_NUM
+
+    # build recorders
+    batch_time = AverageMeter()
+    acc_list = [AverageMeter() for i in range(prechoosing_num, max_choosing_num)]
+
+    # switch to val mode
+    model.eval()
+    model_clf.eval()
+
+    with torch.no_grad():
+
+        end = time.time()
+        for i, (video_feature, target, meta) in enumerate(val_loader):
+
+            total_batch_size = target.shape[0]
+
+            # pre-choosing
+            prechosen_frames = ((np.array(range(prechoosing_num)) + 0.5) / prechoosing_num *
+                                config.MODEL.FRAMEDIV_NUM).astype(np.int)
+            input = torch.zeros((total_batch_size, config.MODEL.MODALITY_NUM,
+                                 config.MODEL.FRAMEDIV_NUM, config.MODEL.FEATURE_DIM))
+            # FIXME: In multi-modality setting, how to pre-choose frames?
+            input[:, 0, prechosen_frames, :] = video_feature[:, 0, prechosen_frames, :]
+
+            # record the chosen frames
+            record = torch.zeros((total_batch_size, config.MODEL.MODALITY_NUM, config.MODEL.FRAMEDIV_NUM)).cuda()
+            # FIXME: same as above
+            record[:, 0, prechosen_frames] = 1
+
+
+            # selecting and evaluating
+
+            for j in range(max_choosing_num - prechoosing_num):
+
+                choosing_prob = model(input)
+                print(F.softmax(choosing_prob[0]))
+                choosing_prob = choosing_prob * (1 - record.view(total_batch_size, -1))
+                chosen_modality = torch.argmax(choosing_prob, dim=1) / config.MODEL.FRAMEDIV_NUM
+                chosen_frames = torch.argmax(choosing_prob, dim=1) % config.MODEL.FRAMEDIV_NUM
+
+                print(chosen_modality)
+                print(chosen_frames)
+
+                # update the input
+                input[range(total_batch_size), chosen_modality, chosen_frames, :] = \
+                    video_feature[range(total_batch_size), chosen_modality, chosen_frames, :]
+
+                # compute the output
+
+                clf_score, _ = model_clf(input.cuda(), if_fusion=False)
+
+                # update acc
+                target = target.cuda(async=True)
+                avg_acc = compute_acc(clf_score, target)
+                acc_list[j].update(avg_acc, total_batch_size)
+
+                # update record
+                record[range(total_batch_size), chosen_modality, chosen_frames] = 1
+
+            # update time record
+            batch_time.update(time.time() - end)
+            end = time.time()
+
+            if i % config.TEST.PRINT_EVERY == 0:
+                msg = 'Test: [{0}/{1}]\t' \
+                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t' \
+                      'Accuracy {acc_avg}'.format(
+                    i, len(val_loader), batch_time=batch_time,
+                    acc_avg=[round(acc.avg, 3) for acc in acc_list])
+                logger.info(msg)
+
+
+    mean_avg_acc = np.array([acc.avg for acc in acc_list]).mean()
+    return mean_avg_acc
+
+
+def validate_sel_baseline(config, val_loader, model, criterion, extra_sample, epoch = 0,
+                 output_dict = None, valid_dataset = None):
+    """
+    validate backbone, lstm and clf_head only.
+    unsorted sampling is used for each video.
+
+    :param config: global configs
+    :param val_loader: data loader
+    :param model: model to be trained
+    :param criterion: loss module
+    :param epoch: current epoch
+    :return: None
+    """
+    # whether to output the result
+    if_output_result = (valid_dataset != None)
+    label_head = ['label' for i in range(config.MODEL.CLFDIM)]
+    score_head = ['score' for i in range(config.MODEL.CLFDIM)]
+
+    # build recorders
+    batch_time = AverageMeter()
+    clf_losses = AverageMeter()
+    acc = AverageMeter()
+
+    # switch to val mode
+    model.eval()
+
+    with torch.no_grad():
+
+        end = time.time()
+        for i, (video_feature, target, meta) in enumerate(val_loader):
+
+            total_batch_size = target.shape[0]
+
+
+            # uniformly sample *prechoosing_num* frames
+            frame_chosen = ((torch.Tensor(range(config.TRAIN_SEL.PRECHOOSING_NUM)) + 0.5) / config.TRAIN_SEL.PRECHOOSING_NUM *
+                            config.MODEL.FRAMEDIV_NUM).type(torch.long)
+
+            target = target.cuda()
+
+            input = torch.zeros((total_batch_size, config.MODEL.MODALITY_NUM,
+                                 config.MODEL.FRAMEDIV_NUM, config.MODEL.FEATURE_DIM))
+            input[:, 0, frame_chosen, :] = video_feature[:, 0, frame_chosen, :]
+
+
+            # randomly sample extra frames
+            frame_chosen = torch.multinomial(
+                input=torch.ones((config.MODEL.FRAMEDIV_NUM)) / config.MODEL.FRAMEDIV_NUM,
+                num_samples=extra_sample)
+            modality_chosen = torch.multinomial(
+                input=torch.ones((config.MODEL.MODALITY_NUM)) / config.MODEL.MODALITY_NUM,
+                num_samples=extra_sample, replacement=True)
+            input[:, modality_chosen, frame_chosen, :] = video_feature[:, modality_chosen, frame_chosen, :]
+
+
+            # compute the output
+
+            clf_score, _ = model(input, if_fusion=False)
+
+            # for j in range(config.MODEL.MODALITY_NUM):
+            #     if j == 0:
+            #         clf_score = clf_score_list[0]
+            #         loss = criterion.focal_loss(clf_score_list[0], target)
+            #     else:
+            #         clf_score += clf_score_list[j]
+            #         loss += criterion.focal_loss(clf_score_list[j], target)
+
+            # update acc
+            avg_acc = compute_acc(clf_score, target)
+            acc.update(avg_acc, total_batch_size)
+
+            # compute loss
+            loss = criterion.focal_loss(clf_score, target)
 
             # update total clf_loss
             clf_losses.update(loss.item(), total_batch_size)

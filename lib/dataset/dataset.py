@@ -74,6 +74,11 @@ class ActivityNet_I3D(VideoSet):
                   '/activity_net.v1-3.min.json', 'r') as annfile:
             anndata = json.load(annfile)
 
+        # load dataset for SelectiveNet
+        with open(self.config.TRAIN.DATAROOT + self.config.TRAIN.DATASET +
+                  '/selective_training_set.json', 'r') as selfile:
+            seldata = json.load(selfile)
+
         video_info_dict = {}
 
         for video_name, v in anndata['database'].items():
@@ -86,7 +91,11 @@ class ActivityNet_I3D(VideoSet):
                 'metadata': {
                     'framenum': 0,  # decided later
                     'duration': v['duration'],
-                    'segment': v['annotations'][0]['segment']
+                    'segment': v['annotations'][0]['segment'],
+                    'chosen_modality': 0,
+                    'chosen_frame': 0,
+                    'target_modality': 0,
+                    'target_frame': 0
                 },
                 'label': v['annotations'][0]['label']
             }
@@ -97,7 +106,7 @@ class ActivityNet_I3D(VideoSet):
 
         cnt = 0
         with open(self.config.TRAIN.DATAROOT + self.config.TRAIN.DATASET
-                  + '/video_info_new.csv', 'r') as infofile:
+                  + '/video_info_new_original.csv', 'r') as infofile:
             with open(self.config.TRAIN.DATAROOT + self.config.TRAIN.DATASET
                       + '/video_numframe_correction.csv', 'r') as correction_file:
                 lines = csv.DictReader(infofile)
@@ -138,10 +147,12 @@ class ActivityNet_I3D(VideoSet):
                     # if not rgb_feature.any() \
                     #             or rgb_feature.shape[0] == 0:
                     #     continue
+                    elif self.mode == 'training' and line['video'] not in seldata:
+                        continue
                     else:
                         cnt += 1
                         print(cnt)
-                        # if cnt > 200:
+                        # if cnt > 64:
                         #     break
 
 
@@ -149,6 +160,15 @@ class ActivityNet_I3D(VideoSet):
                         self.i3d_flow_feature_list.append(torch.FloatTensor(i3d_flow_feature))
                         self.resnet_rgb_feature_list.append(torch.FloatTensor(resnet_rgb_feature))
                         video_info_dict[line['video']]['metadata']['framenum'] = i3d_rgb_feature.shape[0]
+                        if self.mode == 'training':
+                            video_info_dict[line['video']]['metadata']['chosen_modality'] = \
+                                seldata[line['video']][0]
+                            video_info_dict[line['video']]['metadata']['chosen_frame'] = \
+                                seldata[line['video']][1]
+                            video_info_dict[line['video']]['metadata']['target_modality'] = \
+                                np.array(seldata[line['video']][2]).astype(np.int)
+                            video_info_dict[line['video']]['metadata']['target_frame'] = \
+                                np.array(seldata[line['video']][3]).astype(np.int)
                         self.video_info.append(video_info_dict[line['video']])
                         self.name_list.append(line['video'])
 
@@ -170,20 +190,23 @@ class ActivityNet_I3D(VideoSet):
 
         sample = torch.FloatTensor(range(self.config.MODEL.FRAMEDIV_NUM)) / self.config.MODEL.FRAMEDIV_NUM + \
                  torch.rand(self.config.MODEL.FRAMEDIV_NUM) / (self.config.MODEL.FRAMEDIV_NUM + 1)
+        # sample = (torch.FloatTensor(range(self.config.MODEL.FRAMEDIV_NUM)) + 0.5) / self.config.MODEL.FRAMEDIV_NUM
         sample = (sample * meta['framenum']).type(torch.long)
+
+        return torch.stack([self.resnet_rgb_feature_list[idx][sample, :],]), label_idx, meta
 
         # return torch.stack([self.i3d_rgb_feature_list[idx][sample, :],
         #                     self.i3d_flow_feature_list[idx][sample, :],
         #                     ]), \
         #        label_idx, meta
 
-        return torch.stack([torch.cat((self.i3d_rgb_feature_list[idx][sample, :],
-                                       self.i3d_rgb_feature_list[idx][sample, :]), dim=1),
-                            torch.cat((self.i3d_flow_feature_list[idx][sample, :],
-                                       self.i3d_flow_feature_list[idx][sample, :]), dim=1),
-                            self.resnet_rgb_feature_list[idx][sample, :],
-                            ]), \
-               label_idx, meta
+        # return torch.stack([torch.cat((self.i3d_rgb_feature_list[idx][sample, :],
+        #                                self.i3d_rgb_feature_list[idx][sample, :]), dim=1),
+        #                     torch.cat((self.i3d_flow_feature_list[idx][sample, :],
+        #                                self.i3d_flow_feature_list[idx][sample, :]), dim=1),
+        #                     self.resnet_rgb_feature_list[idx][sample, :],
+        #                     ]), \
+        #        label_idx, meta
 
 
 def get_dataset(config, if_train = True, transform = None):

@@ -18,24 +18,27 @@ import torchvision.transforms as transforms
 import _init_paths
 from core.config import config
 from core.config import extra
-from core.function import train_clf
-from core.function import validate_clf
+from core.function import train_sel
+from core.function import train_sel_2
+from core.function import validate_sel
 from core.loss import Loss
 from dataset.dataset import get_dataset
 from models.model import create_model
+from models.model import create_sel_model
 from utils.utils import create_optimizer
 from utils.utils import create_logger
 from utils.replay_buffer import create_replay_buffer
 from utils.utils import get_cycle_lr
+from utils.utils import my_collate
 
 
 def main():
     # convert to train_clf mode
-    config.MODE = 'train_clf'
+    config.MODE = 'train_sel'
     extra()
 
     # create a logger
-    logger = create_logger(config, 'train')
+    logger = create_logger(config, 'train_sel')
 
     # logging configurations
     logger.info(pprint.pformat(config))
@@ -49,10 +52,10 @@ def main():
     os.environ["CUDA_VISIBLE_DEVICES"] = config.GPUS
     # gpus = [int(i) for i in config.GPUS.split(',')]
     gpus = range(config.GPU_NUM)
-    model = create_model(config, is_train=True)
+    model = create_sel_model(config)
 
     if config.TRAIN.RESUME:
-        model.my_load_state_dict(torch.load(config.TRAIN.STATE_DICT), strict=False)
+        model.my_load_state_dict(torch.load(config.TRAIN.STATE_DICT), strict=True)
 
     if not config.TRAIN_CLF.SINGLE_GPU:  # use multi gpus in parallel
         model = model.cuda(gpus[0])
@@ -62,6 +65,11 @@ def main():
         gpus = [int(i) for i in config.TRAIN_CLF.GPU.split(',')]
         os.environ["CUDA_VISIBLE_DEVICES"] = config.TRAIN_CLF.GPU
         model = model.cuda()
+
+    # loading classification model
+    model_clf = create_model(config, is_train=True)
+    model_clf.my_load_state_dict(torch.load(config.STATE_DICT.F_C), strict=False)
+    model_clf = model_clf.cuda()
 
     # create a Loss class
     criterion = Loss(config).cuda()
@@ -90,15 +98,15 @@ def main():
         batch_size=config.TRAIN.BATCH_SIZE * len(gpus),
         shuffle=config.TRAIN.SHUFFLE,
         num_workers=config.WORKERS,
-        pin_memory=False,
-        drop_last=True
+        pin_memory=True,
+        collate_fn=my_collate
     )
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset,
         batch_size=config.TRAIN.BATCH_SIZE * len(gpus),
         shuffle=False,
         num_workers=config.WORKERS,
-        pin_memory=False,
+        pin_memory=True,
     )
 
     # training and validating
@@ -115,11 +123,11 @@ def main():
             optimizer = create_optimizer(config, model)
 
         # train for one epoch
-        train_clf(config, train_loader, model, criterion, optimizer, epoch)
+        train_sel_2(config, train_loader, model, model_clf, criterion, optimizer, epoch)
 
         # evaluate on validation set
         if (epoch + 1) % config.TEST.TEST_EVERY == 0:
-            perf_indicator = validate_clf(config, valid_loader, model, criterion, epoch)
+            perf_indicator = validate_sel(config, valid_loader, model, model_clf, criterion, epoch)
 
             if perf_indicator > best_perf:
                 logger.info("=> saving checkpoint into {}".format(os.path.join(config.OUTPUT_DIR, 'checkpoint_{}.pth'.format(perf_indicator))))
@@ -127,10 +135,10 @@ def main():
                 torch.save(model.state_dict(), os.path.join(config.OUTPUT_DIR, 'checkpoint_{}.pth'.format(perf_indicator)))
 
     logger.info("=> saving final model into {}".format(
-        os.path.join(config.OUTPUT_DIR, 'model_clf_{acc_avg}.pth'.format(acc_avg=perf_indicator))
+        os.path.join(config.OUTPUT_DIR, 'model_sel_{acc_avg}.pth'.format(acc_avg=perf_indicator))
     ))
     torch.save(model.state_dict(),
-               os.path.join(config.OUTPUT_DIR, 'model_clf_{acc_avg}.pth'.format(acc_avg=perf_indicator)))
+               os.path.join(config.OUTPUT_DIR, 'model_sel_{acc_avg}.pth'.format(acc_avg=perf_indicator)))
 
 
 if __name__ == '__main__':

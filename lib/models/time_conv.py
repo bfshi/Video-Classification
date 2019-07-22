@@ -42,6 +42,30 @@ class L2_Norm(nn.Module):
         print(x.norm(dim=(2, 3)).mean())
         return x / (x.norm(dim=(3), keepdim=True) + 1e-5)
 
+class AdaBatchNorm2d(nn.Module):
+    def __init__(self, in_channels):
+        """
+        A modified instance normalization.
+        Only normalize those frames not stuffed by 0.
+        """
+        super(AdaBatchNorm2d, self).__init__()
+        self.in_channels = in_channels
+        self.norm = torch.nn.ModuleList([nn.BatchNorm2d(1, affine=False) for i in range(self.in_channels)])
+
+    def forward(self, x):
+        N, C, T, D = x.shape
+        x = x.transpose(0, 1)
+        x = x.contiguous().view(C, N * T, D)
+        for i in range(self.in_channels):
+            # non_zero_index is of shape (n, 1), where n is number of non_zeros. Each row is a index.
+            non_zero_index = torch.nonzero((x[i] != 0).type(torch.int).sum(dim=1))
+            x[i, non_zero_index[:, 0], :] = self.norm[i](x[i, non_zero_index[:, 0], :].view(1, 1,
+                                                                                            non_zero_index.shape[0], D))
+        x = x.contiguous().view(C, N, T, D)
+        x = x.transpose(0, 1)
+        return x
+
+
 # input.shape = [batch_size, channel_num, temporal_len, feature_dim]
 
 class Basic_Block(nn.Module):
@@ -49,24 +73,30 @@ class Basic_Block(nn.Module):
         super(Basic_Block, self).__init__()
 
         self.conv1 = nn.Conv2d(in_channels=in_channels[0], out_channels=out_channels[0],
-                               kernel_size=(kernel_size[0], 1), stride=(stride[0], 1), padding=(padding[0], 0))
+                               kernel_size=(kernel_size[0], 1), stride=(stride[0], 1), padding=(padding[0], 0),
+                               )
         # self.norm1 = nn.BatchNorm2d(num_features=out_channels[0])
         self.norm1 = nn.InstanceNorm2d(out_channels[0])
+        # self.norm1 = AdaBatchNorm2d(out_channels[0])
         # self.norm1 = L2_Norm()
         # self.norm1 = nn.Sequential(nn.InstanceNorm2d(out_channels[0]), L2_Norm())
 
         self.conv2 = nn.Conv2d(in_channels=in_channels[1], out_channels=out_channels[1],
-                               kernel_size=(kernel_size[1], 1), stride=(stride[1], 1), padding=(padding[1], 0))
+                               kernel_size=(kernel_size[1], 1), stride=(stride[1], 1), padding=(padding[1], 0),
+                               )
         # self.norm2 = nn.BatchNorm2d(num_features=out_channels[1])
         self.norm2 = nn.InstanceNorm2d(out_channels[1])
+        # self.norm2 = AdaBatchNorm2d(out_channels[1])
         # self.norm2 = L2_Norm()
         # self.norm2 = nn.Sequential(nn.InstanceNorm2d(out_channels[0]), L2_Norm())
 
 
     def forward(self, x):
         x = self.conv1(x)
+        #x = x ** 2
         x = self.norm1(x)
         x = self.conv2(x)
+        #x = x ** 2
         x = self.norm2(x)
 
         return x
@@ -77,19 +107,23 @@ class Time_Conv(nn.Module):
         super(Time_Conv, self).__init__()
 
         # 128 -> 64
-        self.conv1 = nn.Conv2d(in_channels=1, out_channels=out_channels[0],
-                               kernel_size=(kernel_size[0], 1), stride=(stride[0], 1), padding=(padding[0], 0))
+        self.conv1 = nn.Conv2d(in_channels=config.MODEL.MODALITY_NUM, out_channels=out_channels[0],
+                               kernel_size=(kernel_size[0], 1), stride=(stride[0], 1), padding=(padding[0], 0),
+                               )
         # self.norm1 = nn.BatchNorm2d(num_features=out_channels[0])
         # self.norm1 = L2_Norm()
         self.norm1 = nn.InstanceNorm2d(out_channels[0])
+        # self.norm1 = AdaBatchNorm2d(out_channels[0])
         # self.norm1 = nn.Sequential(nn.InstanceNorm2d(out_channels[0]), L2_Norm())
 
         # 64 -> 32
         self.conv2 = nn.Conv2d(in_channels=in_channels[1], out_channels=out_channels[1],
-                               kernel_size=(kernel_size[1], 1), stride=(stride[1], 1), padding=(padding[1], 0))
+                               kernel_size=(kernel_size[1], 1), stride=(stride[1], 1), padding=(padding[1], 0),
+                               )
         # self.norm2 = nn.BatchNorm2d(num_features=out_channels[1])
         # self.norm2 = L2_Norm()
         self.norm2 = nn.InstanceNorm2d(out_channels[1])
+        # self.norm2 = AdaBatchNorm2d(out_channels[1])
         # self.norm2 = nn.Sequential(nn.InstanceNorm2d(out_channels[0]), L2_Norm())
 
         # 32 -> 16
@@ -108,8 +142,10 @@ class Time_Conv(nn.Module):
 
     def forward(self, x):
         x = self.conv1(x)
+        #x = x ** 2
         x = self.norm1(x)
         x = self.conv2(x)
+        #x = x ** 2
         x = self.norm2(x)
         x = self.relu1(x)
         x = self.maxpooling1(x)
@@ -120,5 +156,54 @@ class Time_Conv(nn.Module):
 
         return x
 
+
+class Time_Conv_Sel(nn.Module):
+    def __init__(self):
+        super(Time_Conv_Sel, self).__init__()
+
+        self.conv1 = nn.Conv2d(in_channels=config.MODEL.MODALITY_NUM, out_channels=out_channels[0],
+                               kernel_size=(kernel_size[0], 1), stride=(1, 1), padding=(padding[0], 0),
+                               )
+        # self.norm1 = nn.BatchNorm2d(num_features=out_channels[0])
+        # self.norm1 = L2_Norm()
+        self.norm1 = nn.InstanceNorm2d(out_channels[0])
+        # self.norm1 = AdaBatchNorm2d(out_channels[0])
+        # self.norm1 = nn.Sequential(nn.InstanceNorm2d(out_channels[0]), L2_Norm())
+
+        self.conv2 = nn.Conv2d(in_channels=in_channels[1], out_channels=out_channels[1],
+                               kernel_size=(kernel_size[1], 1), stride=(1, 1), padding=(padding[1], 0),
+                               )
+        # self.norm2 = nn.BatchNorm2d(num_features=out_channels[1])
+        # self.norm2 = L2_Norm()
+        self.norm2 = nn.InstanceNorm2d(out_channels[1])
+        # self.norm2 = AdaBatchNorm2d(out_channels[1])
+        # self.norm2 = nn.Sequential(nn.InstanceNorm2d(out_channels[0]), L2_Norm())
+
+        self.relu1 = nn.ReLU()
+
+        self.layer1 = Basic_Block(in_channels, [out_channels[0], 1], kernel_size, stride=[1, 1], padding=padding)
+
+        self.relu2 = nn.ReLU()
+
+        self.final_layer = Flatten()
+
+    def forward(self, x):
+        x = self.conv1(x)
+        #x = x ** 2
+        x = self.norm1(x)
+        x = self.conv2(x)
+        #x = x ** 2
+        x = self.norm2(x)
+        x = self.relu1(x)
+        x = self.layer1(x)
+        x = self.relu2(x)
+        x = self.final_layer(x)
+
+        return x
+
+
 def get_time_conv():
     return Time_Conv()
+
+def get_time_conv_sel():
+    return Time_Conv_Sel()
